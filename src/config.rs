@@ -1,12 +1,69 @@
 use crate::{debug_log, log};
-use color_eyre::eyre::Result;
-use std::path::Path;
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use serde::de::Error;
+use serde::{Deserialize, Deserializer};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
-    pub source: Option<String>,
-    pub destination: Option<String>,
-    pub logs_expanded: Option<bool>,
+    pub output_folder: PathBuf,
+    pub date_format: String,
+    #[serde(deserialize_with = "deserialize_compressed_file_name_pattern")]
+    pub compressed_file_name_pattern: String,
+    pub targets: Vec<TargetConfig>,
+    pub cleanup: Option<CleanupConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TargetConfig {
+    pub path: PathBuf,
+    pub archive_path: Option<String>,
+    #[serde(deserialize_with = "deserialize_globset")]
+    pub include: Option<GlobSet>,
+    #[serde(deserialize_with = "deserialize_globset")]
+    pub exclude: Option<GlobSet>,
+    pub max_depth: Option<i32>,
+    pub min_depth: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CleanupConfig {
+    pub keep_last: Option<usize>,
+    pub delete_older_than_days: Option<u64>,
+}
+
+fn deserialize_compressed_file_name_pattern<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let pattern = String::deserialize(deserializer)?;
+
+    if !pattern.contains("{date}") {
+        return Err(Error::custom(
+            "compressed_file_name_pattern must contain the {date} placeholder",
+        ));
+    }
+    Ok(pattern)
+}
+
+fn deserialize_globset<'de, D>(deserializer: D) -> Result<Option<GlobSet>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(patterns) = Option::<HashSet<String>>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(Glob::new(&pattern).map_err(D::Error::custom)?);
+    }
+    let globset = builder.build().map_err(D::Error::custom)?;
+
+    Ok(Some(globset))
 }
 
 #[derive(Debug)]
@@ -23,7 +80,7 @@ impl std::fmt::Display for ConfigError {
             ConfigError::Parse(e) => e.to_string(),
             ConfigError::NotFound => "Config file not found".to_string(),
         };
-        write!(f, "{}", message)
+        write!(f, "{message}")
     }
 }
 
@@ -32,33 +89,35 @@ impl std::error::Error for ConfigError {
         match self {
             ConfigError::IO(e) => Some(e),
             ConfigError::Parse(e) => Some(e),
-            _ => None,
+            ConfigError::NotFound => None,
         }
     }
 }
 
 pub fn read_app_config(config_path: &Path) -> Result<AppConfig, ConfigError> {
-    let path = config_path;
-
-    let result = std::fs::read_to_string(path);
-    let Some(file_contents) = result.as_ref().ok().filter(|c| !c.trim().is_empty()) else {
+    let result = std::fs::read_to_string(config_path);
+    let Some(file_contents) = result
+        .as_ref()
+        .ok()
+        .filter(|contents| !contents.trim().is_empty())
+    else {
         return match result {
             Ok(_) => {
                 debug_log!("Config file is empty");
                 Err(ConfigError::NotFound)
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                debug_log!("Config file not found");
+                Err(ConfigError::NotFound)
+            }
             Err(e) => {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    debug_log!("Config file not found");
-                    return Err(ConfigError::NotFound);
-                }
                 log!("Error reading config file: {}", e);
                 Err(ConfigError::IO(e))
             }
-        }
+        };
     };
 
-    let parsed_config = serde_json::from_str::<AppConfig>(file_contents).map_err(ConfigError::Parse)?;
+    let parsed_config = serde_json::from_str(file_contents).map_err(ConfigError::Parse)?;
     log!("Config loaded successfully");
     Ok(parsed_config)
 }
