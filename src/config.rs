@@ -1,31 +1,31 @@
+use crate::path_glob::PathGlob;
 use crate::{debug_log, log};
-use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
-use std::{
-    collections::HashSet,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
-    pub output_folder: PathBuf,
-    pub date_format: String,
+    pub output_folder: Option<PathBuf>,
+    pub targets: Vec<TargetConfig>,
+    #[serde(default)]
+    pub copy_empty_folders: bool,
+    #[serde(default)]
+    pub follow_symlinks: bool,
+    pub cleanup: Option<CleanupConfig>,
     #[serde(deserialize_with = "deserialize_compressed_file_name_pattern")]
     pub compressed_file_name_pattern: String,
-    pub targets: Vec<TargetConfig>,
-    pub cleanup: Option<CleanupConfig>,
+    #[serde(default)]
+    pub compression: CompressionOptions,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TargetConfig {
     pub path: PathBuf,
     pub archive_path: Option<String>,
-    #[serde(deserialize_with = "deserialize_globset")]
-    pub include: Option<GlobSet>,
-    #[serde(deserialize_with = "deserialize_globset")]
-    pub exclude: Option<GlobSet>,
-    pub max_depth: Option<i32>,
+    pub include: Option<Vec<PathGlob>>,
+    pub exclude: Option<Vec<PathGlob>>,
+    pub max_depth: Option<usize>,
     pub min_depth: Option<usize>,
 }
 
@@ -33,6 +33,45 @@ pub struct TargetConfig {
 pub struct CleanupConfig {
     pub keep_last: Option<usize>,
     pub delete_older_than_days: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CompressionOptions {
+    #[serde(deserialize_with = "deserialize_compression_method")]
+    pub method: CompressionMethod,
+    pub level: u8,
+}
+
+impl Default for CompressionOptions {
+    fn default() -> Self {
+        Self {
+            method: CompressionMethod::Deflate,
+            level: 5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub enum CompressionMethod {
+    Deflate,
+    LZMA2,
+    PPMd,
+}
+
+fn deserialize_compression_method<'de, D>(deserializer: D) -> Result<CompressionMethod, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let pattern = String::deserialize(deserializer)?.to_lowercase();
+
+    match pattern.as_str() {
+        "deflate" => Ok(CompressionMethod::Deflate),
+        "lzma2" => Ok(CompressionMethod::LZMA2),
+        "ppmd" => Ok(CompressionMethod::PPMd),
+        _ => Err(Error::custom(
+            "compression_method must be one of 'deflate', 'lzma2', or 'ppmd'",
+        ))
+    }
 }
 
 fn deserialize_compressed_file_name_pattern<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -47,23 +86,6 @@ where
         ));
     }
     Ok(pattern)
-}
-
-fn deserialize_globset<'de, D>(deserializer: D) -> Result<Option<GlobSet>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let Some(patterns) = Option::<HashSet<String>>::deserialize(deserializer)? else {
-        return Ok(None);
-    };
-
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        builder.add(Glob::new(&pattern).map_err(D::Error::custom)?);
-    }
-    let globset = builder.build().map_err(D::Error::custom)?;
-
-    Ok(Some(globset))
 }
 
 #[derive(Debug)]
