@@ -1,63 +1,68 @@
-// use crate::config::TargetConfig;
-// use std::path::Path;
-// use walkdir::WalkDir;
-// 
-// pub fn replicate_folder_structure(
-//     target_config: &TargetConfig,
-//     source_path: &Path,
-//     destination_path: &Path,
-// ) {
-//     let walkdir = walk_folder(&target_config);
-// 
-//     let valid_entries = walkdir.into_iter()
-//         .filter_entry(|entry| entry.file_type().is_file() || entry.file_type().is_dir())
-//         .filter_map(|entry| {
-//             if let Err(error) = &entry {
-//                 log_client.warn(format!("Failed to read entry, skipping: {:?}", error));
-//             }
-//             entry.ok()
-//         });
-// 
-//     let mut success = 0;
-//     let mut failed = 0;
-// 
-//     for entry in valid_entries {
-//         let entry_path = entry.into_path();
-//         let relative_path = pathdiff::diff_paths(&entry_path, source_path).unwrap();
-//         let destination_path = destination_path.join(relative_path);
-// 
-//         if entry_path.is_dir() {
-//             if let Err(err) = std::fs::create_dir_all(&destination_path) {
-//                 log_client.warn(format!("Failed to create directory '{}' (this might cause more errors): {:?}", destination_path.display(), err));
-//             };
-//             continue;
-//         }
-// 
-//         let resolved_source_path = if entry_path.is_symlink() {
-//             let result = entry_path.read_link()
-//                 .inspect_err(|err| log_client.warn(format!("Failed to read symlink target, skipping entry: {:?}", err)));
-// 
-//             if let Ok(value) = result { value } else { continue }
-//         } else { entry_path };
-// 
-//         if create_symlink(&resolved_source_path, &destination_path, log_client) {
-//             success += 1;
-//         } else {
-//             failed += 1;
-//         }
-//     }
-// 
-//     log_client.finished(success, failed, cancellation_token.load(Ordering::Relaxed));
-// }
-// 
-// fn walk_folder(config: &TargetConfig) -> WalkDir {
-//     let folder = config.path.as_path();
-//     let mut walk = WalkDir::new(folder).follow_links(false);
-//     if let Some(min_depth) = config.min_depth {
-//         walk = walk.min_depth(min_depth);
-//     }
-//     if let Some(max_depth) = config.max_depth {
-//         walk = walk.max_depth(max_depth);
-//     }
-//     walk
-// }
+use crate::config::{AppConfig, TargetConfig};
+use crate::{debug_log, log};
+use walkdir::WalkDir;
+
+pub fn run_backup(
+    app_config: &AppConfig,
+) {
+    for target_config in &app_config.targets {
+        run_backup_for_target(app_config, target_config);
+    }
+}
+
+fn run_backup_for_target(
+    app_config: &AppConfig,
+    target_config: &TargetConfig,
+) {
+    let base_path = target_config.path.as_path();
+    let mut walker = walk_folder(&target_config).into_iter();
+
+    loop {
+        let entry = match walker.next() {
+            None => break,
+            Some(Err(err)) => {
+                log!("Failed to read entry, skipping: {:?}", err);
+                continue;
+            }
+            Some(Ok(entry)) => entry,
+        };
+
+        let entry_full_path = entry.path();
+        let entry_relative_path = pathdiff::diff_paths(&entry_full_path, base_path).unwrap();
+        let is_folder = entry.file_type().is_dir();
+
+        if is_excluded(&target_config, entry_relative_path.to_str().unwrap()) {
+            if is_folder {
+                debug_log!("Skipping entire directory: {}", entry_relative_path.display());
+                walker.skip_current_dir();
+            } else {
+                debug_log!("Skipping excluded entry: {} {:?}", entry_relative_path.display(), entry_relative_path.parent());
+            }
+            continue;
+        }
+        if is_folder {
+            continue;
+        }
+
+        println!("TODO: Add file '{}' to compressed file", entry_relative_path.display());
+    }
+}
+
+fn walk_folder(config: &TargetConfig) -> WalkDir {
+    let folder = config.path.as_path();
+    let mut walk = WalkDir::new(folder).follow_links(false);
+    if let Some(min_depth) = config.min_depth {
+        walk = walk.min_depth(min_depth);
+    }
+    if let Some(max_depth) = config.max_depth {
+        walk = walk.max_depth(max_depth);
+    }
+    walk
+}
+
+fn is_excluded(config: &TargetConfig, relative_path: &str) -> bool {
+    if config.exclude.as_ref().is_some_and(|set| set.is_match(relative_path)) {
+        return true;
+    }
+    config.include.as_ref().is_some_and(|set| !set.accepts_prefix(relative_path))
+}

@@ -1,4 +1,4 @@
-use crate::path_glob::{PathGlob, PathGlobSet};
+use crate::path_glob::PathGlobSet;
 use crate::{debug_log, log};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 pub struct AppConfig {
     pub output_folder: Option<PathBuf>,
     pub targets: Vec<TargetConfig>,
-    #[serde(default)]
-    pub copy_empty_folders: bool,
     #[serde(default)]
     pub follow_symlinks: bool,
     pub cleanup: Option<CleanupConfig>,
