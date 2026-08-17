@@ -1,4 +1,4 @@
-use crate::path_glob::PathGlob;
+use crate::path_glob::{PathGlob, PathGlobSet};
 use crate::{debug_log, log};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
@@ -23,8 +23,8 @@ pub struct AppConfig {
 pub struct TargetConfig {
     pub path: PathBuf,
     pub archive_path: Option<String>,
-    pub include: Option<Vec<PathGlob>>,
-    pub exclude: Option<Vec<PathGlob>>,
+    pub include: Option<PathGlobSet>,
+    pub exclude: Option<PathGlobSet>,
     pub max_depth: Option<usize>,
     pub min_depth: Option<usize>,
 }

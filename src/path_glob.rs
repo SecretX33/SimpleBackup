@@ -5,6 +5,7 @@ use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 use std::fmt::Formatter;
+use std::hash::Hash;
 
 #[derive(Debug, Clone)]
 pub struct PathGlob {
@@ -21,13 +22,17 @@ impl std::fmt::Display for PathGlob {
     }
 }
 
-impl<'de> Deserialize<'de> for PathGlob {
-    fn deserialize<D>(deserializer: D) -> core::result::Result<PathGlob, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Self::new(&s).map_err(D::Error::custom)
+impl PartialEq for PathGlob {
+    fn eq(&self, other: &Self) -> bool {
+        self.normalized_pattern == other.normalized_pattern
+    }
+}
+
+impl Eq for PathGlob {}
+
+impl Hash for PathGlob {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.normalized_pattern.hash(state);
     }
 }
 
@@ -49,14 +54,53 @@ impl PathGlob {
             return true;
         }
 
-        // Adds a path separator at the end to ensure a directory named `src` doesn't match
-        // a file named `src.rs`
+        // Adds a path separator at the end to ensure a directory named 'src' doesn't match
+        // a file named 'src.rs'
         let descendant_prefix = format!("{normalized_prefix}{PATH_SEPARATOR}");
         self.prefix_regex.is_match(&descendant_prefix)
     }
 
     pub fn is_match(&self, url: &str) -> bool {
         self.regex.is_match(url)
+    }
+}
+
+impl<'de> Deserialize<'de> for PathGlob {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<PathGlob, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::new(&s).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PathGlobSet {
+    globs: Vec<PathGlob>,
+}
+
+impl PathGlobSet {
+    pub fn new(globs: impl Into<Vec<PathGlob>>) -> Self {
+        Self { globs: globs.into() }
+    }
+
+    pub fn is_match(&self, url: &str) -> bool {
+        self.globs.iter().any(|glob| glob.is_match(url))
+    }
+
+    pub fn accepts_prefix(&self, prefix: &str) -> bool {
+        self.globs.iter().any(|glob| glob.accepts_prefix(prefix))
+    }
+}
+
+impl<'de> Deserialize<'de> for PathGlobSet {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<PathGlobSet, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = Vec::<PathGlob>::deserialize(deserializer)?;
+        Ok(Self::new(s))
     }
 }
 
