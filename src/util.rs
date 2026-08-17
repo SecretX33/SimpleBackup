@@ -62,7 +62,7 @@ pub fn find_common_path_denominator(paths: &[&Path]) -> Result<Option<PathBuf>> 
         .iter()
         .map(path::absolute)
         .collect::<std::io::Result<Vec<_>>>()?;
-    
+
     let mut common_path = absolute_paths[0].clone();
 
     while absolute_paths

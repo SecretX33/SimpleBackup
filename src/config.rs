@@ -41,8 +41,8 @@ pub struct AppConfig {
 
 #[derive(Debug, Clone)]
 pub struct TargetConfig {
-    pub path: PathBuf,
-    pub archive_path: String,
+    pub path: PathBuf, // Absolute path
+    pub archive_path: PathBuf, // Relative path
     pub include: Option<PathGlobSet>,
     pub exclude: Option<PathGlobSet>,
     pub max_depth: Option<usize>,
@@ -79,10 +79,24 @@ pub enum CompressionMethod {
     PPMd,
 }
 
+impl CompressionMethod {
+    pub fn extension(&self) -> &'static str {
+        match self {
+            CompressionMethod::Deflate => "zip",
+            CompressionMethod::LZMA2 => "7z",
+            CompressionMethod::PPMd => "7z",
+        }
+    }
+}
+
 impl TryFrom<RawAppConfig> for AppConfig {
     type Error = color_eyre::Report;
 
     fn try_from(value: RawAppConfig) -> Result<Self> {
+        if value.targets.is_empty() {
+            bail!("Invalid config: 'targets' must not be empty");
+        }
+
         let absolute_target_paths = value
             .targets
             .iter()
@@ -116,6 +130,12 @@ impl TryFrom<RawAppConfig> for AppConfig {
             .is_some_and(|e| e.is_empty())
         {
             bail!("'compressed_file_name_prefix' must not be empty");
+        }
+
+        if let Some(level) = value.compression.as_ref().map(|e| e.level) {
+            if level > 9 {
+                bail!("'compression_level' must be a value between 0 and 9");
+            }
         }
 
         Ok(Self {
@@ -152,17 +172,19 @@ fn parse_target(
     }
 
     let final_archive_path = raw_target.archive_path
-        .or_else(|| common_target_denominator.map(|common_path| {
-            path.strip_prefix(common_path)
-                .expect("Could not make target path relative to the common denominator")
-                .to_string_lossy()
-                .into_owned()
-        }))
+        .or_else(|| {
+            common_target_denominator.map(|common_path| {
+                path.strip_prefix(common_path)
+                    .expect("Could not make target path relative to the common denominator")
+                    .to_string_lossy()
+                    .into_owned()
+            }).filter(|e| !e.is_empty())
+        })
         .unwrap_or_else(|| path.file_name().unwrap().to_string_lossy().into_owned());
 
     Ok(TargetConfig {
         path,
-        archive_path: final_archive_path,
+        archive_path: PathBuf::from(final_archive_path),
         include: raw_target.include,
         exclude: raw_target.exclude,
         max_depth: raw_target.max_depth,
