@@ -11,7 +11,7 @@ pub struct PathGlob {
     raw_pattern: String,
     normalized_pattern: String,
     normalized_segments: Vec<String>,
-    normalized_segments_regex: Vec<Regex>,
+    prefix_regex: Regex,
     regex: Regex,
 }
 
@@ -36,40 +36,23 @@ impl PathGlob {
         build_glob(glob)
     }
 
+    /// Returns whether `prefix` matches the glob itself or a matching path can
+    /// still exist beneath that relative directory.
     pub fn accepts_prefix(&self, prefix: &str) -> bool {
-        let segments = &self.normalized_segments;
-        let first_segment = segments
-            .get(0)
-            .expect("Glob must have at least one segment");
-
-        if first_segment == "**"
-            || first_segment.starts_with("*") && segments.len() == 1
-        {
-            // If the first segment of the glob is just a ** or single *, it matches any prefix
+        let normalized_prefix = prefix.trim_end_matches(PATH_SEPARATOR);
+        if normalized_prefix.is_empty() {
+            // Every valid relative glob may match something below the walk root
             return true;
         }
 
-        let last_segment_index = segments.len() - 1;
-        let segments_without_match_all_index = segments.iter().position(|e| !e.contains("**")).unwrap_or(last_segment_index);
-        let segments_without_match_all = &self.normalized_segments_regex[0..=segments_without_match_all_index];
-        let prefix_segments = prefix.split(PATH_SEPARATOR);
+        if self.regex.is_match(normalized_prefix) {
+            return true;
+        }
 
-        // prefix:  a/b/c/d
-        // pattern: a/b/**
-        // expected: true
-
-        // prefix:  a/b
-        // pattern: a/b/c/d/**
-        // expected: true (meaning "possibly will match")
-
-        // prefix:  a/b/c
-        // pattern: a/b/*/d/**
-        // expected: true (meaning "possibly will match")
-
-        let all_matched = prefix_segments.zip(segments_without_match_all)
-            .all(|(segment, regex)| regex.is_match(segment));
-
-        all_matched
+        // Adds a path separator at the end to ensure a directory named `src` doesn't match
+        // a file named `src.rs`
+        let descendant_prefix = format!("{normalized_prefix}{PATH_SEPARATOR}");
+        self.prefix_regex.is_match(&descendant_prefix)
     }
 
     pub fn is_match(&self, url: &str) -> bool {
@@ -87,19 +70,16 @@ fn build_glob(glob: &str) -> Result<PathGlob> {
     validate_glob(&normalized_glob)?;
 
     let regex = glob_to_regex(&normalized_glob)?;
+    let prefix_regex = glob_to_prefix_regex(&normalized_glob)?;
     let normalized_segments = normalized_glob
         .split(PATH_SEPARATOR)
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
-    let normalized_segments_regex = normalized_segments.iter()
-        .map(|s| glob_to_regex(s).unwrap())
-        .collect::<Vec<_>>();
-
     Ok(PathGlob {
         raw_pattern: glob.to_string(),
         normalized_pattern: normalized_glob.to_string(),
         normalized_segments,
-        normalized_segments_regex,
+        prefix_regex,
         regex,
     })
 }
@@ -144,28 +124,81 @@ const MATCH_ONE_CHAR: &str = if PATH_SEPARATOR == '/' {
     r"[^\\/]"
 };
 
-fn glob_to_regex(glob: &str) -> Result<Regex> {
-    let mut regex_pattern = String::with_capacity(glob.len() * 2);
-    regex_pattern.push_str("(?i)^");
+enum GlobToken {
+    Literal(char),
+    OneChar,
+    OneSegment,
+    Anything,
+}
+
+fn glob_tokens(glob: &str) -> Vec<GlobToken> {
+    let mut tokens = Vec::with_capacity(glob.len());
     let mut characters = glob.chars().peekable();
 
     while let Some(current) = characters.next() {
         match current {
-            '?' => regex_pattern.push_str(MATCH_ONE_CHAR),
+            '?' => tokens.push(GlobToken::OneChar),
             '*' if characters.peek() == Some(&'*') => {
-                regex_pattern.push_str(MATCH_ANYTHING);
+                tokens.push(GlobToken::Anything);
                 while characters.peek() == Some(&'*') {
                     characters.next();
                 }
             }
-            '*' => regex_pattern.push_str(MATCH_ONE_SEGMENT),
-            _ => {
-                if is_regex_meta_character(current) {
-                    regex_pattern.push('\\');
-                }
-                regex_pattern.push(current);
+            '*' => tokens.push(GlobToken::OneSegment),
+            _ => tokens.push(GlobToken::Literal(current)),
+        }
+    }
+
+    tokens
+}
+
+fn push_token_regex(regex_pattern: &mut String, token: &GlobToken) {
+    match token {
+        GlobToken::Literal(character) => {
+            if is_regex_meta_character(*character) {
+                regex_pattern.push('\\');
+            }
+            regex_pattern.push(*character);
+        }
+        GlobToken::OneChar => regex_pattern.push_str(MATCH_ONE_CHAR),
+        GlobToken::OneSegment => regex_pattern.push_str(MATCH_ONE_SEGMENT),
+        GlobToken::Anything => regex_pattern.push_str(MATCH_ANYTHING),
+    }
+}
+
+fn glob_to_regex(glob: &str) -> Result<Regex> {
+    let mut regex_pattern = String::with_capacity(glob.len() * 2);
+    regex_pattern.push_str("(?i)^");
+
+    for token in glob_tokens(glob) {
+        push_token_regex(&mut regex_pattern, &token);
+    }
+    regex_pattern.push('$');
+
+    Ok(Regex::new(&regex_pattern)?)
+}
+
+/// Builds a regex that matches every character prefix of a path that the glob
+/// could match. `accepts_prefix` applies it at a directory boundary.
+fn glob_to_prefix_regex(glob: &str) -> Result<Regex> {
+    let mut regex_pattern = String::with_capacity(glob.len() * 4);
+    regex_pattern.push_str("(?i)^");
+    let mut optional_groups = 0;
+
+    for token in glob_tokens(glob) {
+        match token {
+            GlobToken::OneSegment | GlobToken::Anything => {
+                push_token_regex(&mut regex_pattern, &token);
+            }
+            GlobToken::Literal(_) | GlobToken::OneChar => {
+                regex_pattern.push_str("(?:");
+                push_token_regex(&mut regex_pattern, &token);
+                optional_groups += 1;
             }
         }
+    }
+    for _ in 0..optional_groups {
+        regex_pattern.push_str(")?");
     }
     regex_pattern.push('$');
 
@@ -189,20 +222,38 @@ mod tests {
     }
 
     fn assert_matches(glob: &str, candidate: &str) {
-        let g =
+        let path_glob =
             PathGlob::new(glob).unwrap_or_else(|e| panic!("Failed to create glob '{glob}': {e}"));
         assert!(
-            g.is_match(candidate),
-            "Expected glob '{glob}' to match path '{candidate}'"
+            path_glob.is_match(candidate),
+            "Expected glob '{glob:?}' to match path '{candidate}'"
         );
     }
 
     fn assert_does_not_match(glob: &str, candidate: &str) {
-        let g =
+        let path_glob =
             PathGlob::new(glob).unwrap_or_else(|e| panic!("Failed to create glob '{glob}': {e}"));
         assert!(
-            !g.is_match(candidate),
-            "Expected glob '{glob}' not to match path '{candidate}'"
+            !path_glob.is_match(candidate),
+            "Expected glob '{glob:?}' not to match path '{candidate}'"
+        );
+    }
+
+    fn assert_accepts_prefix(glob: &str, prefix: &str) {
+        let glob =
+            PathGlob::new(glob).unwrap_or_else(|e| panic!("Failed to create glob '{glob}': {e}"));
+        assert!(
+            glob.accepts_prefix(prefix),
+            "Expected glob '{glob:?}' to accept directory prefix '{prefix}'"
+        );
+    }
+
+    fn assert_rejects_prefix(glob: &str, prefix: &str) {
+        let glob =
+            PathGlob::new(glob).unwrap_or_else(|e| panic!("Failed to create glob '{glob}': {e}"));
+        assert!(
+            !glob.accepts_prefix(prefix),
+            "Expected glob '{glob:?}' to reject directory prefix '{prefix}'"
         );
     }
 
@@ -310,8 +361,7 @@ mod tests {
                 regex.as_str(),
                 format!(
                     "(?i)^{MATCH_ONE_CHAR}{}{MATCH_ONE_SEGMENT}\\.rs{}{MATCH_ANYTHING}$",
-                    PATH_SEPARATOR_REGEX_ESCAPED,
-                    PATH_SEPARATOR_REGEX_ESCAPED
+                    PATH_SEPARATOR_REGEX_ESCAPED, PATH_SEPARATOR_REGEX_ESCAPED
                 )
             );
         }
@@ -400,6 +450,134 @@ mod tests {
 
             assert_matches(&glob, &path(&["música", "canção.txt"]));
             assert_does_not_match(&glob, &path(&["música", "outra.txt"]));
+        }
+    }
+
+    mod prefix_matching {
+        use super::*;
+
+        #[test]
+        fn accepts_the_walk_root_and_an_exact_match() {
+            let glob = path(&["a", "b"]);
+
+            assert_accepts_prefix(&glob, "");
+            assert_accepts_prefix(&glob, &path(&["a", "b"]));
+        }
+
+        #[test]
+        fn literal_globs_only_accept_branches_that_can_reach_the_match() {
+            let glob = path(&["a", "b", "c", "d"]);
+
+            assert_accepts_prefix(&glob, "a");
+            assert_accepts_prefix(&glob, &path(&["a", "b"]));
+            assert_accepts_prefix(&glob, &path(&["a", "b", "c"]));
+            assert_accepts_prefix(&glob, &path(&["a", "b", "c", "d"]));
+
+            assert_rejects_prefix(&glob, "other");
+            assert_rejects_prefix(&glob, &path(&["a", "x"]));
+            assert_rejects_prefix(&glob, &path(&["a", "b", "cd"]));
+            assert_rejects_prefix(&glob, &path(&["a", "b", "c", "d", "e"]));
+        }
+
+        #[test]
+        fn accepts_the_documented_directory_walk_scenarios() {
+            assert_accepts_prefix(&path(&["a", "b", "**"]), &path(&["a", "b", "c", "d"]));
+            assert_accepts_prefix(&path(&["a", "b", "c", "d", "**"]), &path(&["a", "b"]));
+            assert_accepts_prefix(&path(&["a", "b", "*", "d", "**"]), &path(&["a", "b", "c"]));
+        }
+
+        #[test]
+        fn single_star_cannot_cross_a_directory_separator() {
+            let glob = path(&["a", "*", "d"]);
+
+            assert_accepts_prefix(&glob, "a");
+            assert_accepts_prefix(&glob, &path(&["a", "x"]));
+            assert_accepts_prefix(&glob, &path(&["a", "x", "d"]));
+            assert_rejects_prefix(&glob, &path(&["a", "x", "y"]));
+            assert_rejects_prefix(&glob, &path(&["a", "x", "d", "child"]));
+        }
+
+        #[test]
+        fn a_partial_directory_name_is_not_a_viable_prefix() {
+            assert_rejects_prefix("*.rs", "src");
+            assert_rejects_prefix(&path(&["a", "source.rs"]), &path(&["a", "source"]));
+            assert_accepts_prefix("*.rs", "lib.rs");
+        }
+
+        #[test]
+        fn double_star_can_consume_arbitrary_directory_depth() {
+            let glob = path(&["base", "**", "target"]);
+
+            assert_accepts_prefix(&glob, "base");
+            assert_accepts_prefix(&glob, &path(&["base", "one"]));
+            assert_accepts_prefix(&glob, &path(&["base", "one", "two", "three"]));
+            assert_rejects_prefix(&glob, "other");
+
+            assert_accepts_prefix(
+                &path(&["**", "target"]),
+                &path(&["any", "directory", "depth"]),
+            );
+        }
+
+        #[test]
+        fn embedded_double_star_can_cross_separators() {
+            let glob = format!("archive**{PATH_SEPARATOR}end");
+
+            assert_accepts_prefix(&glob, &path(&["archive", "year", "month"]));
+            assert_rejects_prefix(&glob, "unrelated");
+        }
+
+        #[test]
+        fn double_star_with_a_file_suffix_accepts_ancestor_directories() {
+            let glob = PathGlob::new("**.rs").unwrap();
+            let prefix = "src";
+            let descendant = path(&["src", "main.rs"]);
+
+            assert!(glob.is_match(&descendant));
+            assert!(
+                glob.accepts_prefix(prefix),
+                "Glob '{glob:?}' must accept '{prefix}' because descendant '{descendant}' matches"
+            );
+        }
+
+        #[test]
+        fn embedded_double_star_suffix_can_be_satisfied_by_a_descendant() {
+            let pattern = path(&["base", "**target", "end"]);
+            let glob = PathGlob::new(&pattern).unwrap();
+            let prefix = path(&["base", "branch"]);
+            let descendant = path(&["base", "branch", "target", "end"]);
+
+            assert!(glob.is_match(&descendant));
+            assert!(
+                glob.accepts_prefix(&prefix),
+                "Glob '{glob:?}' must accept '{prefix}' because descendant '{descendant}' matches"
+            );
+        }
+
+        #[test]
+        fn question_mark_requires_one_character_in_the_current_segment() {
+            let glob = path(&["a", "?", "d"]);
+
+            assert_accepts_prefix(&glob, "a");
+            assert_accepts_prefix(&glob, &path(&["a", "x"]));
+            assert_rejects_prefix(&glob, &path(&["a", "xy"]));
+        }
+
+        #[test]
+        fn prefix_checks_are_case_insensitive() {
+            let glob = format!("SRC{PATH_SEPARATOR}**{PATH_SEPARATOR}*.RS");
+            let prefix = format!("src{0}{0}nested{0}deeper{0}", PATH_SEPARATOR);
+
+            assert_accepts_prefix(&glob, &prefix);
+            assert_rejects_prefix(&glob, &format!("{PATH_SEPARATOR}src"));
+        }
+
+        #[test]
+        fn regex_metacharacters_in_prefixes_remain_literal() {
+            let glob = path(&["a+b", "(target).txt"]);
+
+            assert_accepts_prefix(&glob, "a+b");
+            assert_rejects_prefix(&glob, "ab");
         }
     }
 
