@@ -43,8 +43,8 @@ impl PathGlob {
 
     /// Returns whether `prefix` matches the glob itself or a matching path can
     /// still exist beneath that relative directory.
-    pub fn accepts_prefix(&self, prefix: &str) -> bool {
-        let normalized_prefix = prefix.trim_end_matches(PATH_SEPARATOR);
+    pub fn accepts_prefix(&self, path_prefix: &str) -> bool {
+        let normalized_prefix = path_prefix.trim_end_matches(PATH_SEPARATOR);
         if normalized_prefix.is_empty() {
             // Every valid relative glob may match something below the walk root
             return true;
@@ -60,8 +60,8 @@ impl PathGlob {
         self.prefix_regex.is_match(&descendant_prefix)
     }
 
-    pub fn is_match(&self, url: &str) -> bool {
-        self.regex.is_match(url)
+    pub fn is_match(&self, path: &str) -> bool {
+        self.regex.is_match(path)
     }
 }
 
@@ -85,12 +85,12 @@ impl PathGlobSet {
         Self { globs: globs.into() }
     }
 
-    pub fn is_match(&self, url: &str) -> bool {
-        self.globs.iter().any(|glob| glob.is_match(url))
+    pub fn is_match(&self, path: &str) -> bool {
+        self.globs.iter().any(|glob| glob.is_match(path))
     }
 
-    pub fn accepts_prefix(&self, prefix: &str) -> bool {
-        self.globs.iter().any(|glob| glob.accepts_prefix(prefix))
+    pub fn accepts_prefix(&self, path_prefix: &str) -> bool {
+        self.globs.iter().any(|glob| glob.accepts_prefix(path_prefix))
     }
 }
 
@@ -222,8 +222,6 @@ fn glob_to_regex(glob: &str) -> Result<Regex> {
     Ok(Regex::new(&regex_pattern)?)
 }
 
-/// Builds a regex that matches every character prefix of a path that the glob
-/// could match. `accepts_prefix` applies it at a directory boundary.
 fn glob_to_prefix_regex(glob: &str) -> Result<Regex> {
     let mut regex_pattern = String::with_capacity(glob.len() * 4);
     regex_pattern.push_str("(?i)^");

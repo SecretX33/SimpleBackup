@@ -1,20 +1,32 @@
+use color_eyre::eyre::bail;
 use crate::config::{AppConfig, TargetConfig};
 use crate::{debug_log, log};
 use walkdir::WalkDir;
+use color_eyre::Result;
 
 pub fn run_backup(
     app_config: &AppConfig,
 ) {
     for target_config in &app_config.targets {
-        run_backup_for_target(app_config, target_config);
+        if let Err(err) = run_backup_for_target(app_config, target_config) {
+            log!("Error running backup for target '{}': {}", target_config.path.display(), err);
+            break;
+        }
     }
 }
 
 fn run_backup_for_target(
     app_config: &AppConfig,
     target_config: &TargetConfig,
-) {
+) -> Result<()> {
     let base_path = target_config.path.as_path();
+    if !base_path.exists() {
+        bail!("Target path does not exist");
+    }
+    if !base_path.is_dir() {
+        bail!("Error: target path is not a directory");
+    }
+
     let mut walker = walk_folder(&target_config).into_iter();
 
     loop {
@@ -46,6 +58,8 @@ fn run_backup_for_target(
 
         println!("TODO: Add file '{}' to compressed file", entry_relative_path.display());
     }
+
+    Ok(())
 }
 
 fn walk_folder(config: &TargetConfig) -> WalkDir {
