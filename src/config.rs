@@ -1,7 +1,8 @@
 use crate::path_glob::PathGlobSet;
+use crate::util::{find_common_path_denominator, normalize_path};
 use crate::{debug_log, log};
-use color_eyre::eyre::{bail, eyre};
 use color_eyre::Result;
+use color_eyre::eyre::{Context, bail, eyre};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 use std::path;
@@ -19,7 +20,7 @@ struct RawAppConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct RawTargetConfig {
-    pub path: PathBuf,
+    pub path: String,
     pub archive_path: Option<String>,
     pub include: Option<PathGlobSet>,
     pub exclude: Option<PathGlobSet>,
@@ -32,6 +33,7 @@ struct RawTargetConfig {
 pub struct AppConfig {
     pub output_folder: PathBuf,
     pub targets: Vec<TargetConfig>,
+    pub common_target_denominator: Option<PathBuf>,
     pub cleanup: Option<CleanupConfig>,
     pub compressed_file_name_prefix: String,
     pub compression: CompressionOptions,
@@ -40,7 +42,7 @@ pub struct AppConfig {
 #[derive(Debug, Clone)]
 pub struct TargetConfig {
     pub path: PathBuf,
-    pub archive_path: Option<String>,
+    pub archive_path: String,
     pub include: Option<PathGlobSet>,
     pub exclude: Option<PathGlobSet>,
     pub max_depth: Option<usize>,
@@ -81,19 +83,49 @@ impl TryFrom<RawAppConfig> for AppConfig {
     type Error = color_eyre::Report;
 
     fn try_from(value: RawAppConfig) -> Result<Self> {
-        let targets = value.targets.into_iter()
-            .map(|raw_target| parse_target(raw_target, value.follow_symlinks))
+        let absolute_target_paths = value
+            .targets
+            .iter()
+            .map(|target| path::absolute(normalize_path(&target.path).as_ref()))
+            .collect::<std::io::Result<Vec<_>>>()?;
+
+        let target_paths = absolute_target_paths
+            .iter()
+            .map(PathBuf::as_path)
+            .collect::<Vec<_>>();
+        let common_target_denominator = find_common_path_denominator(&target_paths)
+            .context("Could not find common denominator for target paths")?;
+
+        let targets: Vec<TargetConfig> = value
+            .targets
+            .into_iter()
+            .zip(absolute_target_paths)
+            .map(|(raw_target, absolute_path)| {
+                parse_target(
+                    raw_target,
+                    absolute_path,
+                    value.follow_symlinks,
+                    common_target_denominator.as_deref(),
+                )
+            })
             .collect::<Result<_>>()?;
 
-        if value.compressed_file_name_prefix.as_ref().is_some_and(|e| e.is_empty()) {
+        if value
+            .compressed_file_name_prefix
+            .as_ref()
+            .is_some_and(|e| e.is_empty())
+        {
             bail!("'compressed_file_name_prefix' must not be empty");
         }
 
         Ok(Self {
             output_folder: value.output_folder,
             targets,
+            common_target_denominator,
             cleanup: value.cleanup,
-            compressed_file_name_prefix: value.compressed_file_name_prefix.unwrap_or_else(|| "backup_".to_string()),
+            compressed_file_name_prefix: value
+                .compressed_file_name_prefix
+                .unwrap_or_else(|| "backup_".to_string()),
             compression: value.compression.unwrap_or_default(),
         })
     }
@@ -101,18 +133,36 @@ impl TryFrom<RawAppConfig> for AppConfig {
 
 fn parse_target(
     raw_target: RawTargetConfig,
+    path: PathBuf,
     global_follow_symlinks: Option<bool>,
+    common_target_denominator: Option<&Path>,
 ) -> Result<TargetConfig> {
-    let follow_symlinks = raw_target.follow_symlinks.or(global_follow_symlinks).unwrap_or(false);
+    if !path.is_absolute() {
+        bail!("Target path must be absolute");
+    }
+
+    let follow_symlinks = raw_target
+        .follow_symlinks
+        .or(global_follow_symlinks)
+        .unwrap_or(false);
     if let (Some(min_depth), Some(max_depth)) = (raw_target.min_depth, raw_target.max_depth) {
         if min_depth > max_depth {
             bail!("Invalid config: 'min_depth' must be less than or equal to 'max_depth'");
         }
     }
 
+    let final_archive_path = raw_target.archive_path
+        .or_else(|| common_target_denominator.map(|common_path| {
+            path.strip_prefix(common_path)
+                .expect("Could not make target path relative to the common denominator")
+                .to_string_lossy()
+                .into_owned()
+        }))
+        .unwrap_or_else(|| path.file_name().unwrap().to_string_lossy().into_owned());
+
     Ok(TargetConfig {
-        path: path::absolute(&raw_target.path)?,
-        archive_path: raw_target.archive_path.clone(),
+        path,
+        archive_path: final_archive_path,
         include: raw_target.include,
         exclude: raw_target.exclude,
         max_depth: raw_target.max_depth,
@@ -133,7 +183,7 @@ where
         "ppmd" => Ok(CompressionMethod::PPMd),
         _ => Err(Error::custom(
             "compression_method must be one of 'deflate', 'lzma2', or 'ppmd'",
-        ))
+        )),
     }
 }
 

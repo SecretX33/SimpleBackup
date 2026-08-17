@@ -1,9 +1,9 @@
+use crate::util::{normalize_path, PATH_SEPARATOR, PATH_SEPARATOR_STR, INVERTED_PATH_SEPARATOR, PATH_SEPARATOR_REGEX_ESCAPED};
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use regex_lite::Regex;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
-use std::borrow::Cow;
 use std::fmt::Formatter;
 use std::hash::Hash;
 
@@ -104,13 +104,8 @@ impl<'de> Deserialize<'de> for PathGlobSet {
     }
 }
 
-const PATH_SEPARATOR: char = std::path::MAIN_SEPARATOR;
-const PATH_SEPARATOR_STR: &str = std::path::MAIN_SEPARATOR_STR;
-const PATH_SEPARATOR_REGEX_ESCAPED: &str = if PATH_SEPARATOR == '/' { "/" } else { r"\\" };
-const INVERTED_PATH_SEPARATOR: char = if PATH_SEPARATOR == '/' { '\\' } else { '/' };
-
 fn build_glob(glob: &str) -> Result<PathGlob> {
-    let normalized_glob = normalize_glob(glob);
+    let normalized_glob = normalize_path(glob);
     validate_glob(&normalized_glob)?;
 
     let regex = glob_to_regex(&normalized_glob)?;
@@ -126,18 +121,6 @@ fn build_glob(glob: &str) -> Result<PathGlob> {
         prefix_regex,
         regex,
     })
-}
-
-fn normalize_glob(glob: &str) -> Cow<'_, str> {
-    let mut value: Cow<str> = Cow::Borrowed(glob);
-    if value.contains(INVERTED_PATH_SEPARATOR) {
-        value = Cow::Owned(value.replace(INVERTED_PATH_SEPARATOR, PATH_SEPARATOR_STR));
-    }
-    if value.contains(&format!("{PATH_SEPARATOR}{PATH_SEPARATOR}")) {
-        let regex = Regex::new(&format!("{PATH_SEPARATOR_REGEX_ESCAPED}+")).unwrap();
-        value = Cow::Owned(regex.replace_all(&value, PATH_SEPARATOR_STR).into_owned());
-    }
-    value
 }
 
 fn validate_glob(glob: &str) -> Result<()> {
@@ -301,25 +284,6 @@ mod tests {
 
     mod normalization {
         use super::*;
-
-        #[test]
-        fn leaves_an_already_normalized_glob_borrowed() {
-            let glob = path(&["src", "*.rs"]);
-            let normalized = normalize_glob(&glob);
-
-            assert_eq!(normalized, glob);
-            assert!(matches!(normalized, Cow::Borrowed(_)));
-        }
-
-        #[test]
-        fn converts_inverted_and_collapses_repeated_separators() {
-            let glob = format!(
-                "src{0}{0}nested{1}{1}{1}*.rs",
-                INVERTED_PATH_SEPARATOR, PATH_SEPARATOR
-            );
-
-            assert_eq!(normalize_glob(&glob), path(&["src", "nested", "*.rs"]));
-        }
 
         #[test]
         fn build_glob_keeps_the_raw_pattern_and_uses_the_normalized_form() {

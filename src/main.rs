@@ -2,6 +2,7 @@ mod log_macros;
 mod config;
 mod file;
 mod path_glob;
+mod util;
 
 use std::path;
 use crate::config::read_app_config;
