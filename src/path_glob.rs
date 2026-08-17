@@ -11,6 +11,7 @@ pub struct PathGlob {
     raw_pattern: String,
     normalized_pattern: String,
     normalized_segments: Vec<String>,
+    normalized_segments_regex: Vec<Regex>,
     regex: Regex,
 }
 
@@ -36,17 +37,39 @@ impl PathGlob {
     }
 
     pub fn accepts_prefix(&self, prefix: &str) -> bool {
-        let first_segment = self
-            .normalized_segments
+        let segments = &self.normalized_segments;
+        let first_segment = segments
             .get(0)
             .expect("Glob must have at least one segment");
+
         if first_segment == "**"
-            || first_segment.starts_with("*") && self.normalized_segments.len() == 1
+            || first_segment.starts_with("*") && segments.len() == 1
         {
             // If the first segment of the glob is just a ** or single *, it matches any prefix
             return true;
         }
-        self.regex.is_match(prefix)
+
+        let last_segment_index = segments.len() - 1;
+        let segments_without_match_all_index = segments.iter().position(|e| !e.contains("**")).unwrap_or(last_segment_index);
+        let segments_without_match_all = &self.normalized_segments_regex[0..=segments_without_match_all_index];
+        let prefix_segments = prefix.split(PATH_SEPARATOR);
+
+        // prefix:  a/b/c/d
+        // pattern: a/b/**
+        // expected: true
+
+        // prefix:  a/b
+        // pattern: a/b/c/d/**
+        // expected: true (meaning "possibly will match")
+
+        // prefix:  a/b/c
+        // pattern: a/b/*/d/**
+        // expected: true (meaning "possibly will match")
+
+        let all_matched = prefix_segments.zip(segments_without_match_all)
+            .all(|(segment, regex)| regex.is_match(segment));
+
+        all_matched
     }
 
     pub fn is_match(&self, url: &str) -> bool {
@@ -64,15 +87,19 @@ fn build_glob(glob: &str) -> Result<PathGlob> {
     validate_glob(&normalized_glob)?;
 
     let regex = glob_to_regex(&normalized_glob)?;
-    let segments = normalized_glob
+    let normalized_segments = normalized_glob
         .split(PATH_SEPARATOR)
         .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+    let normalized_segments_regex = normalized_segments.iter()
+        .map(|s| glob_to_regex(s).unwrap())
         .collect::<Vec<_>>();
 
     Ok(PathGlob {
         raw_pattern: glob.to_string(),
         normalized_pattern: normalized_glob.to_string(),
-        normalized_segments: segments,
+        normalized_segments,
+        normalized_segments_regex,
         regex,
     })
 }
