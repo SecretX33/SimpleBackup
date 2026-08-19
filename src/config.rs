@@ -13,6 +13,7 @@ struct RawAppConfig {
     pub output_folder: PathBuf,
     pub targets: Vec<RawTargetConfig>,
     pub follow_symlinks: Option<bool>,
+    pub smart_copy_compressed_files: Option<bool>,
     pub cleanup: Option<CleanupConfig>,
     pub compressed_file_name_prefix: Option<String>,
     pub compression: Option<CompressionOptions>,
@@ -27,6 +28,7 @@ struct RawTargetConfig {
     pub min_depth: Option<usize>,
     pub max_depth: Option<usize>,
     pub follow_symlinks: Option<bool>,
+    pub smart_copy_compressed_files: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -41,13 +43,14 @@ pub struct AppConfig {
 
 #[derive(Debug, Clone)]
 pub struct TargetConfig {
-    pub path: PathBuf, // Absolute path
+    pub path: PathBuf,         // Absolute path
     pub archive_path: PathBuf, // Relative path
     pub include: Option<PathGlobSet>,
     pub exclude: Option<PathGlobSet>,
     pub max_depth: Option<usize>,
     pub min_depth: Option<usize>,
     pub follow_symlinks: bool,
+    pub smart_copy_compressed_files: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,6 +122,7 @@ impl TryFrom<RawAppConfig> for AppConfig {
                     raw_target,
                     absolute_path,
                     value.follow_symlinks,
+                    value.smart_copy_compressed_files,
                     common_target_denominator.as_deref(),
                 )
             })
@@ -155,6 +159,7 @@ fn parse_target(
     raw_target: RawTargetConfig,
     path: PathBuf,
     global_follow_symlinks: Option<bool>,
+    global_smart_copy_compressed_files: Option<bool>,
     common_target_denominator: Option<&Path>,
 ) -> Result<TargetConfig> {
     if !path.is_absolute() {
@@ -165,20 +170,28 @@ fn parse_target(
         .follow_symlinks
         .or(global_follow_symlinks)
         .unwrap_or(false);
+    let smart_copy_compressed_files = raw_target
+        .smart_copy_compressed_files
+        .or(global_smart_copy_compressed_files)
+        .unwrap_or(false);
+
     if let (Some(min_depth), Some(max_depth)) = (raw_target.min_depth, raw_target.max_depth) {
         if min_depth > max_depth {
             bail!("Invalid config: 'min_depth' must be less than or equal to 'max_depth'");
         }
     }
 
-    let final_archive_path = raw_target.archive_path
+    let final_archive_path = raw_target
+        .archive_path
         .or_else(|| {
-            common_target_denominator.map(|common_path| {
-                path.strip_prefix(common_path)
-                    .expect("Could not make target path relative to the common denominator")
-                    .to_string_lossy()
-                    .into_owned()
-            }).filter(|e| !e.is_empty())
+            common_target_denominator
+                .map(|common_path| {
+                    path.strip_prefix(common_path)
+                        .expect("Could not make target path relative to the common denominator")
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .filter(|e| !e.is_empty())
         })
         .unwrap_or_else(|| path.file_name().unwrap().to_string_lossy().into_owned());
 
@@ -190,6 +203,7 @@ fn parse_target(
         max_depth: raw_target.max_depth,
         min_depth: raw_target.min_depth,
         follow_symlinks,
+        smart_copy_compressed_files,
     })
 }
 

@@ -1,6 +1,5 @@
 // Disable warnings
 #[allow(unused_macros)]
-
 #[macro_export]
 macro_rules! log {
     ($( $args:expr ),*) => { println!( $( $args ),* ) }

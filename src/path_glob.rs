@@ -1,4 +1,4 @@
-use crate::util::{normalize_path, PATH_SEPARATOR, PATH_SEPARATOR_STR, INVERTED_PATH_SEPARATOR, PATH_SEPARATOR_REGEX_ESCAPED};
+use crate::util::{PATH_SEPARATOR, normalize_path};
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use regex_lite::Regex;
@@ -82,7 +82,9 @@ pub struct PathGlobSet {
 
 impl PathGlobSet {
     pub fn new(globs: impl Into<Vec<PathGlob>>) -> Self {
-        Self { globs: globs.into() }
+        Self {
+            globs: globs.into(),
+        }
     }
 
     pub fn is_match(&self, path: &str) -> bool {
@@ -90,7 +92,9 @@ impl PathGlobSet {
     }
 
     pub fn accepts_prefix(&self, path_prefix: &str) -> bool {
-        self.globs.iter().any(|glob| glob.accepts_prefix(path_prefix))
+        self.globs
+            .iter()
+            .any(|glob| glob.accepts_prefix(path_prefix))
     }
 }
 
@@ -241,6 +245,7 @@ fn is_regex_meta_character(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::PATH_SEPARATOR_STR;
 
     fn path(segments: &[&str]) -> String {
         segments.join(PATH_SEPARATOR_STR)
@@ -284,6 +289,7 @@ mod tests {
 
     mod normalization {
         use super::*;
+        use crate::util::INVERTED_PATH_SEPARATOR;
 
         #[test]
         fn build_glob_keeps_the_raw_pattern_and_uses_the_normalized_form() {
@@ -299,6 +305,7 @@ mod tests {
 
     mod validation {
         use super::*;
+        use crate::util::INVERTED_PATH_SEPARATOR;
 
         #[test]
         fn rejects_an_empty_glob() {
@@ -346,6 +353,7 @@ mod tests {
 
     mod regex_conversion {
         use super::*;
+        use crate::util::PATH_SEPARATOR_REGEX_ESCAPED;
 
         #[test]
         fn anchors_the_regex_and_escapes_literal_characters() {
@@ -397,6 +405,7 @@ mod tests {
 
     mod matching {
         use super::*;
+        use crate::util::INVERTED_PATH_SEPARATOR;
 
         #[test]
         fn literals_match_the_entire_path_case_insensitively() {

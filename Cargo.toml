@@ -14,7 +14,13 @@ thiserror = "2.0.20"
 walkdir = "2.5.0"
 
 [profile.release]
-opt-level = "s"
+opt-level = 3
 lto = true
 panic = "abort"
 strip = true
+
+[profile.profiling]
+inherits = "release"
+panic = "unwind"
+strip = false
+debug = true
