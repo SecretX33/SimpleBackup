@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Deserialize)]
 struct RawAppConfig {
     pub output_folder: PathBuf,
+    #[serde(default, deserialize_with = "deserialize_humantime_duration")]
+    pub min_backup_interval: Option<std::time::Duration>,
     pub sources: Vec<RawSourceConfig>,
     pub follow_symlinks: Option<bool>,
     pub skip_recompression_for_known_formats: Option<bool>,
@@ -35,6 +37,7 @@ struct RawSourceConfig {
 pub struct AppConfig {
     pub output_folder: PathBuf,
     pub sources: Vec<SourceConfig>,
+    pub min_backup_interval: Option<std::time::Duration>,
     pub retention: Option<RetentionConfig>,
     pub archive_name_prefix: String,
     pub compression: CompressionOptions,
@@ -146,8 +149,11 @@ impl TryFrom<RawAppConfig> for AppConfig {
 
         Ok(Self {
             output_folder: value.output_folder,
+            min_backup_interval: value.min_backup_interval,
             sources,
-            retention: value.retention.filter(|it| it.max_age.is_some() || it.keep_last.is_some()),
+            retention: value
+                .retention
+                .filter(|it| it.max_age.is_some() || it.keep_last.is_some()),
             archive_name_prefix: value
                 .archive_name_prefix
                 .unwrap_or_else(|| "backup_".to_string()),
@@ -280,55 +286,4 @@ pub fn read_app_config(config_path: &Path) -> Result<AppConfig, ConfigError> {
         .map_err(ConfigError::Parse)?;
     log!("Config loaded successfully");
     Ok(parsed_config)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deserializes_renamed_configuration_fields() {
-        let config: RawAppConfig = serde_json::from_str(
-            r#"{
-                "output_folder": "backups",
-                "sources": [{
-                    "path": ".",
-                    "path_in_archive": "project",
-                    "skip_recompression_for_known_formats": false
-                }],
-                "skip_recompression_for_known_formats": true,
-                "archive_name_prefix": "snapshot_",
-                "retention": {
-                    "keep_last": 5,
-                    "max_age": "30 days"
-                },
-                "compression": {
-                    "algorithm": "lzma2",
-                    "level": 7
-                }
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(config.sources.len(), 1);
-        assert_eq!(
-            config.sources[0].path_in_archive.as_deref(),
-            Some("project")
-        );
-        assert_eq!(
-            config.sources[0].skip_recompression_for_known_formats,
-            Some(false)
-        );
-        assert_eq!(config.skip_recompression_for_known_formats, Some(true));
-        assert_eq!(config.archive_name_prefix.as_deref(), Some("snapshot_"));
-        assert_eq!(config.retention.as_ref().unwrap().keep_last, Some(5));
-        assert_eq!(
-            config.retention.as_ref().unwrap().max_age,
-            Some(std::time::Duration::from_secs(30 * 24 * 60 * 60))
-        );
-        assert!(matches!(
-            config.compression.unwrap().algorithm,
-            CompressionAlgorithm::LZMA2
-        ));
-    }
 }

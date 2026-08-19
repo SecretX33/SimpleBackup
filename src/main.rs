@@ -7,10 +7,10 @@ mod util;
 
 use crate::backup::run_backup;
 use crate::config::read_app_config;
+use crate::file::cleanup_old_backups;
 use color_eyre::eyre::{Context, Result};
 use std::path;
 use std::path::PathBuf;
-use crate::file::cleanup_old_backups;
 
 fn main() -> Result<()> {
     color_eyre::install()?;

@@ -1,4 +1,5 @@
 use crate::config::{AppConfig, CompressionAlgorithm, CompressionOptions, SourceConfig};
+use crate::file::{ISO_DATETIME_FORMAT, last_backup_time};
 use crate::{debug_log, log};
 use color_eyre::eyre::bail;
 use color_eyre::{Result, eyre};
@@ -8,9 +9,13 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::{IntoIter, WalkDir};
-use crate::file::ISO_DATETIME_FORMAT;
 
 pub fn run_backup(app_config: &AppConfig) {
+    if !backup_is_due(app_config) {
+        log!("Backup is not due yet, skipping...");
+        return;
+    }
+
     let start_time = Instant::now();
     let archive_path = build_archive_path(app_config);
     let mut archive_writer = create_archive_writer(archive_path.as_path(), app_config)
@@ -40,6 +45,15 @@ pub fn run_backup(app_config: &AppConfig) {
         "Backup completed successfully in {}s",
         (start_time.elapsed().as_millis() as f64 / 100.0).floor() / 10.0
     );
+}
+
+fn backup_is_due(app_config: &AppConfig) -> bool {
+    let Some(backup_interval) = app_config.min_backup_interval else { return true };
+    let Some(last_backup_date) = last_backup_time(app_config) else { return true };
+
+    let now = chrono::Local::now();
+    let cutoff_date = now - backup_interval;
+    last_backup_date < cutoff_date
 }
 
 fn run_backup_for_source(
