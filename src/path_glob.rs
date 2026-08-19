@@ -120,7 +120,7 @@ fn build_glob(glob: &str) -> Result<PathGlob> {
 }
 
 fn validate_glob(glob: &str) -> Result<()> {
-    if glob.len() == 0 {
+    if glob.is_empty() {
         return Err(eyre!("Glob cannot be empty"));
     }
 
@@ -227,11 +227,26 @@ fn glob_to_prefix_regex(glob: &str) -> Result<Regex> {
 }
 
 fn is_regex_meta_character(c: char) -> bool {
-    match c {
-        '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$'
-        | '#' | '&' | '-' | '~' => true,
-        _ => false,
-    }
+    matches!(
+        c,
+        '\\' | '.'
+            | '+'
+            | '*'
+            | '?'
+            | '('
+            | ')'
+            | '|'
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '^'
+            | '$'
+            | '#'
+            | '&'
+            | '-'
+            | '~'
+    )
 }
 
 #[cfg(test)]

@@ -35,7 +35,7 @@ struct RawSourceConfig {
 pub struct AppConfig {
     pub output_folder: PathBuf,
     pub sources: Vec<SourceConfig>,
-    pub common_source_denominator: Option<PathBuf>,
+    #[expect(dead_code, reason = "retention cleanup is not implemented yet")]
     pub retention: Option<RetentionConfig>,
     pub archive_name_prefix: String,
     pub compression: CompressionOptions,
@@ -54,6 +54,10 @@ pub struct SourceConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "retention cleanup is not implemented yet")
+)]
 pub struct RetentionConfig {
     pub keep_last: Option<usize>,
     pub max_age_days: Option<u64>,
@@ -136,16 +140,15 @@ impl TryFrom<RawAppConfig> for AppConfig {
             bail!("'archive_name_prefix' must not be empty");
         }
 
-        if let Some(level) = value.compression.as_ref().map(|e| e.level) {
-            if level > 9 {
-                bail!("'compression.level' must be a value between 0 and 9");
-            }
+        if let Some(level) = value.compression.as_ref().map(|e| e.level)
+            && level > 9
+        {
+            bail!("'compression.level' must be a value between 0 and 9");
         }
 
         Ok(Self {
             output_folder: value.output_folder,
             sources,
-            common_source_denominator,
             retention: value.retention,
             archive_name_prefix: value
                 .archive_name_prefix
@@ -175,10 +178,10 @@ fn parse_source(
         .or(global_skip_recompression_for_known_formats)
         .unwrap_or(false);
 
-    if let (Some(min_depth), Some(max_depth)) = (raw_source.min_depth, raw_source.max_depth) {
-        if min_depth > max_depth {
-            bail!("Invalid config: 'min_depth' must be less than or equal to 'max_depth'");
-        }
+    if let (Some(min_depth), Some(max_depth)) = (raw_source.min_depth, raw_source.max_depth)
+        && min_depth > max_depth
+    {
+        bail!("Invalid config: 'min_depth' must be less than or equal to 'max_depth'");
     }
 
     let final_path_in_archive = raw_source

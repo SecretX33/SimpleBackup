@@ -13,7 +13,7 @@ use std::path::PathBuf;
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let app_config_path = path::absolute(PathBuf::from(std::env::args().skip(1).next().expect(
+    let app_config_path = path::absolute(PathBuf::from(std::env::args().nth(1).expect(
         "No arguments provided, please provide the path to your config file as the first argument",
     )))
     .context(

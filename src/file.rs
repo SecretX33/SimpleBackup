@@ -191,17 +191,17 @@ fn handle_recompression_switch(
     archive_writer: &mut ArchiveWriter<File>,
     current_copy_mode: bool,
     entry_full_path: &Path,
-    compression_methods: &Vec<EncoderConfiguration>,
-    copy_methods: &Vec<EncoderConfiguration>,
+    compression_methods: &[EncoderConfiguration],
+    copy_methods: &[EncoderConfiguration],
     source_config: &SourceConfig,
 ) -> bool {
     let copy_without_compression = should_copy_without_compression(entry_full_path, source_config);
 
     if current_copy_mode != copy_without_compression {
         let methods = if copy_without_compression {
-            copy_methods.clone()
+            copy_methods.to_owned()
         } else {
-            compression_methods.clone()
+            compression_methods.to_owned()
         };
         archive_writer.set_content_methods(methods);
     }

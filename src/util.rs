@@ -21,6 +21,30 @@ pub fn normalize_path(glob: &str) -> Cow<'_, str> {
     value
 }
 
+pub fn find_common_path_denominator(paths: &[&Path]) -> Result<Option<PathBuf>> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+
+    let absolute_paths = paths
+        .iter()
+        .map(path::absolute)
+        .collect::<std::io::Result<Vec<_>>>()?;
+
+    let mut common_path = absolute_paths[0].clone();
+
+    while absolute_paths
+        .iter()
+        .skip(1)
+        .any(|candidate| !candidate.starts_with(&common_path))
+    {
+        if !common_path.pop() {
+            return Ok(None);
+        }
+    }
+    Ok(Some(common_path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,28 +75,4 @@ mod tests {
             assert_eq!(normalize_path(&glob), path(&["src", "nested", "*.rs"]));
         }
     }
-}
-
-pub fn find_common_path_denominator(paths: &[&Path]) -> Result<Option<PathBuf>> {
-    if paths.is_empty() {
-        return Ok(None);
-    }
-
-    let absolute_paths = paths
-        .iter()
-        .map(path::absolute)
-        .collect::<std::io::Result<Vec<_>>>()?;
-
-    let mut common_path = absolute_paths[0].clone();
-
-    while absolute_paths
-        .iter()
-        .skip(1)
-        .any(|candidate| !candidate.starts_with(&common_path))
-    {
-        if !common_path.pop() {
-            return Ok(None);
-        }
-    }
-    Ok(Some(common_path))
 }
