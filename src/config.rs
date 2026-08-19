@@ -9,11 +9,12 @@ use std::path;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawAppConfig {
-    pub output_folder: PathBuf,
+    pub output_folder: String,
+    pub sources: Vec<RawSourceConfig>,
     #[serde(default, deserialize_with = "deserialize_humantime_duration")]
     pub min_backup_interval: Option<std::time::Duration>,
-    pub sources: Vec<RawSourceConfig>,
     pub follow_symlinks: Option<bool>,
     pub skip_recompression_for_known_formats: Option<bool>,
     pub retention: Option<RetentionConfig>,
@@ -22,6 +23,7 @@ struct RawAppConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawSourceConfig {
     pub path: String,
     pub path_in_archive: Option<String>,
@@ -56,6 +58,7 @@ pub struct SourceConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RetentionConfig {
     pub keep_last: Option<usize>,
     #[serde(default, deserialize_with = "deserialize_humantime_duration")]
@@ -63,6 +66,7 @@ pub struct RetentionConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CompressionOptions {
     #[serde(deserialize_with = "deserialize_compression_algorithm")]
     pub algorithm: CompressionAlgorithm,
@@ -86,11 +90,11 @@ pub enum CompressionAlgorithm {
 }
 
 impl CompressionAlgorithm {
-    pub const ALL_EXTENSIONS: [&str; 2] = ["7z", "zip"];
+    pub const ALL_EXTENSIONS: [&str; 1] = ["7z"];
 
     pub fn extension(&self) -> &'static str {
         match self {
-            CompressionAlgorithm::Deflate => "zip",
+            CompressionAlgorithm::Deflate => "7z",
             CompressionAlgorithm::LZMA2 => "7z",
             CompressionAlgorithm::PPMd => "7z",
         }
@@ -104,6 +108,7 @@ impl TryFrom<RawAppConfig> for AppConfig {
         if value.sources.is_empty() {
             bail!("Invalid config: 'sources' must not be empty");
         }
+        let output_folder = path::absolute(normalize_path(&value.output_folder).as_ref())?;
 
         let absolute_source_paths = value
             .sources
@@ -133,6 +138,14 @@ impl TryFrom<RawAppConfig> for AppConfig {
             })
             .collect::<Result<_>>()?;
 
+        if let Some(source) = sources.iter().find(|source| output_folder.starts_with(&source.path)) {
+            bail!(
+                "Output folder must not be contained by any source folder to avoid infinite recursion. Source folder: {}. Output folder: {}",
+                source.path.display(),
+                output_folder.display()
+            );
+        }
+
         if value
             .archive_name_prefix
             .as_ref()
@@ -148,9 +161,9 @@ impl TryFrom<RawAppConfig> for AppConfig {
         }
 
         Ok(Self {
-            output_folder: value.output_folder,
-            min_backup_interval: value.min_backup_interval,
+            output_folder,
             sources,
+            min_backup_interval: value.min_backup_interval,
             retention: value
                 .retention
                 .filter(|it| it.max_age.is_some() || it.keep_last.is_some()),

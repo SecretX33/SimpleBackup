@@ -30,7 +30,7 @@ pub fn cleanup_old_backups(app_config: &AppConfig) {
 
     backup_files
         .iter()
-        .for_each(|file| debug_log!("File date: {}", file.date));
+        .for_each(|file| debug_log!("Backup file date: {}", file.date));
 
     if let Some(max_age) = retention_config.max_age {
         let cutoff = now - max_age;

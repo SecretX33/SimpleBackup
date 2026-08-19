@@ -1,5 +1,5 @@
 use crate::config::{AppConfig, CompressionAlgorithm, CompressionOptions, SourceConfig};
-use crate::file::{ISO_DATETIME_FORMAT, last_backup_time};
+use crate::cleanup::{ISO_DATETIME_FORMAT, last_backup_time};
 use crate::{debug_log, log};
 use color_eyre::eyre::bail;
 use color_eyre::{Result, eyre};
@@ -103,7 +103,7 @@ fn run_backup_for_source(
         };
         let is_folder = entry.file_type().is_dir();
 
-        if is_excluded(source_config, &entry_relative_path.to_string_lossy()) {
+        if is_excluded(source_config, &entry_relative_path.to_string_lossy(), is_folder) {
             handle_excluded_entry(&mut walker, entry_relative_path, is_folder);
             continue;
         }
@@ -172,7 +172,7 @@ fn walk_folder(config: &SourceConfig) -> WalkDir {
     walk
 }
 
-fn is_excluded(config: &SourceConfig, relative_path: &str) -> bool {
+fn is_excluded(config: &SourceConfig, relative_path: &str, is_folder: bool) -> bool {
     if config
         .exclude
         .as_ref()
@@ -183,7 +183,7 @@ fn is_excluded(config: &SourceConfig, relative_path: &str) -> bool {
     config
         .include
         .as_ref()
-        .is_some_and(|set| !set.accepts_prefix(relative_path))
+        .is_some_and(|set| if is_folder { !set.accepts_prefix(relative_path) } else { !set.is_match(relative_path) })
 }
 
 fn handle_excluded_entry(walker: &mut IntoIter, entry_relative_path: &Path, is_folder: bool) {
