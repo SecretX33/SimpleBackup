@@ -1,14 +1,16 @@
+mod backup;
 mod config;
 mod file;
 mod log_macros;
 mod path_glob;
 mod util;
 
+use crate::backup::run_backup;
 use crate::config::read_app_config;
-use crate::file::run_backup;
 use color_eyre::eyre::{Context, Result};
 use std::path;
 use std::path::PathBuf;
+use crate::file::cleanup_old_backups;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -23,6 +25,7 @@ fn main() -> Result<()> {
         .context("Could not read config file, please check if the config is valid and try again")?;
 
     run_backup(&config);
+    cleanup_old_backups(&config);
 
     Ok(())
 }

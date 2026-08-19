@@ -35,7 +35,6 @@ struct RawSourceConfig {
 pub struct AppConfig {
     pub output_folder: PathBuf,
     pub sources: Vec<SourceConfig>,
-    #[expect(dead_code, reason = "retention cleanup is not implemented yet")]
     pub retention: Option<RetentionConfig>,
     pub archive_name_prefix: String,
     pub compression: CompressionOptions,
@@ -54,13 +53,10 @@ pub struct SourceConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "retention cleanup is not implemented yet")
-)]
 pub struct RetentionConfig {
     pub keep_last: Option<usize>,
-    pub max_age_days: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_humantime_duration")]
+    pub max_age: Option<std::time::Duration>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -87,6 +83,8 @@ pub enum CompressionAlgorithm {
 }
 
 impl CompressionAlgorithm {
+    pub const ALL_EXTENSIONS: [&str; 2] = ["7z", "zip"];
+
     pub fn extension(&self) -> &'static str {
         match self {
             CompressionAlgorithm::Deflate => "zip",
@@ -149,7 +147,7 @@ impl TryFrom<RawAppConfig> for AppConfig {
         Ok(Self {
             output_folder: value.output_folder,
             sources,
-            retention: value.retention,
+            retention: value.retention.filter(|it| it.max_age.is_some() || it.keep_last.is_some()),
             archive_name_prefix: value
                 .archive_name_prefix
                 .unwrap_or_else(|| "backup_".to_string()),
@@ -212,7 +210,7 @@ fn parse_source(
 
 fn deserialize_compression_algorithm<'de, D>(
     deserializer: D,
-) -> Result<CompressionAlgorithm, D::Error>
+) -> core::result::Result<CompressionAlgorithm, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -226,6 +224,21 @@ where
             "compression.algorithm must be one of 'deflate', 'lzma2', or 'ppmd'",
         )),
     }
+}
+
+fn deserialize_humantime_duration<'de, D>(
+    deserializer: D,
+) -> core::result::Result<Option<std::time::Duration>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let pattern = Option::<String>::deserialize(deserializer)?;
+    pattern
+        .map(|pattern| {
+            humantime::parse_duration(&pattern)
+                .map_err(|e| Error::custom(eyre!("Error deserializing duration '{pattern}': {e}")))
+        })
+        .transpose()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -287,7 +300,7 @@ mod tests {
                 "archive_name_prefix": "snapshot_",
                 "retention": {
                     "keep_last": 5,
-                    "max_age_days": 30
+                    "max_age": "30 days"
                 },
                 "compression": {
                     "algorithm": "lzma2",
@@ -309,7 +322,10 @@ mod tests {
         assert_eq!(config.skip_recompression_for_known_formats, Some(true));
         assert_eq!(config.archive_name_prefix.as_deref(), Some("snapshot_"));
         assert_eq!(config.retention.as_ref().unwrap().keep_last, Some(5));
-        assert_eq!(config.retention.as_ref().unwrap().max_age_days, Some(30));
+        assert_eq!(
+            config.retention.as_ref().unwrap().max_age,
+            Some(std::time::Duration::from_secs(30 * 24 * 60 * 60))
+        );
         assert!(matches!(
             config.compression.unwrap().algorithm,
             CompressionAlgorithm::LZMA2
