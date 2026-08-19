@@ -1,4 +1,4 @@
-use crate::config::{AppConfig, CompressionMethod, CompressionOptions, TargetConfig};
+use crate::config::{AppConfig, CompressionAlgorithm, CompressionOptions, SourceConfig};
 use crate::{debug_log, log};
 use color_eyre::eyre::bail;
 use color_eyre::{Result, eyre};
@@ -16,13 +16,13 @@ pub fn run_backup(app_config: &AppConfig) {
         .expect("Could not create archive writer");
     log!("Starting backup to '{}'", archive_path.display());
 
-    for target_config in &app_config.targets {
+    for source_config in &app_config.sources {
         if let Err(err) =
-            run_backup_for_target(target_config, &app_config.compression, &mut archive_writer)
+            run_backup_for_source(source_config, &app_config.compression, &mut archive_writer)
         {
             log!(
-                "Error running backup for target '{}': {}",
-                target_config.path.display(),
+                "Error running backup for source '{}': {}",
+                source_config.path.display(),
                 err
             );
             // Best effort cleanup
@@ -41,27 +41,27 @@ pub fn run_backup(app_config: &AppConfig) {
     );
 }
 
-fn run_backup_for_target(
-    target_config: &TargetConfig,
+fn run_backup_for_source(
+    source_config: &SourceConfig,
     compression_options: &CompressionOptions,
     archive_writer: &mut ArchiveWriter<File>,
 ) -> Result<()> {
-    let base_path = target_config.path.as_path();
+    let base_path = source_config.path.as_path();
     if !base_path.exists() {
-        bail!("Target path does not exist");
+        bail!("Source path does not exist");
     }
     if !base_path.is_dir() {
-        bail!("Error: target path is not a directory");
+        bail!("Error: source path is not a directory");
     }
     log!(
-        "target_config.archive_path = {}",
-        target_config.archive_path.display()
+        "source_config.path_in_archive = {}",
+        source_config.path_in_archive.display()
     );
 
     let compression_methods = create_compression_methods(compression_options);
     let copy_methods = create_copy_methods();
     let mut copy_mode = false;
-    let mut walker = walk_folder(target_config).into_iter();
+    let mut walker = walk_folder(source_config).into_iter();
 
     loop {
         let entry = match walker.next() {
@@ -88,7 +88,7 @@ fn run_backup_for_target(
         };
         let is_folder = entry.file_type().is_dir();
 
-        if is_excluded(target_config, &entry_relative_path.to_string_lossy()) {
+        if is_excluded(source_config, &entry_relative_path.to_string_lossy()) {
             handle_excluded_entry(&mut walker, entry_relative_path, is_folder);
             continue;
         }
@@ -96,20 +96,20 @@ fn run_backup_for_target(
             continue;
         }
 
-        let file_name = target_config
-            .archive_path
+        let file_name = source_config
+            .path_in_archive
             .join(entry_relative_path)
             .to_str()
             .expect("Could not convert path to string")
             .to_owned();
 
-        copy_mode = handle_smart_copy_compression_switch(
+        copy_mode = handle_recompression_switch(
             archive_writer,
             copy_mode,
             entry_full_path,
             &compression_methods,
             &copy_methods,
-            target_config,
+            source_config,
         );
         log!("Adding file '{}' to compressed file", file_name);
 
@@ -127,14 +127,14 @@ fn run_backup_for_target(
 fn create_compression_methods(
     compression_options: &CompressionOptions,
 ) -> Vec<EncoderConfiguration> {
-    let option = match &compression_options.method {
-        CompressionMethod::Deflate => {
+    let option = match &compression_options.algorithm {
+        CompressionAlgorithm::Deflate => {
             encoder_options::DeflateOptions::from_level(compression_options.level as u32).into()
         }
-        CompressionMethod::LZMA2 => {
+        CompressionAlgorithm::LZMA2 => {
             encoder_options::Lzma2Options::from_level(compression_options.level as u32).into()
         }
-        CompressionMethod::PPMd => {
+        CompressionAlgorithm::PPMd => {
             encoder_options::PpmdOptions::from_level(compression_options.level as u32).into()
         }
     };
@@ -145,7 +145,7 @@ fn create_copy_methods() -> Vec<EncoderConfiguration> {
     vec![EncoderMethod::COPY.into()]
 }
 
-fn walk_folder(config: &TargetConfig) -> WalkDir {
+fn walk_folder(config: &SourceConfig) -> WalkDir {
     let folder = config.path.as_path();
     let mut walk = WalkDir::new(folder).follow_links(config.follow_symlinks);
     if let Some(min_depth) = config.min_depth {
@@ -157,7 +157,7 @@ fn walk_folder(config: &TargetConfig) -> WalkDir {
     walk
 }
 
-fn is_excluded(config: &TargetConfig, relative_path: &str) -> bool {
+fn is_excluded(config: &SourceConfig, relative_path: &str) -> bool {
     if config
         .exclude
         .as_ref()
@@ -187,15 +187,15 @@ fn handle_excluded_entry(walker: &mut IntoIter, entry_relative_path: &Path, is_f
     }
 }
 
-fn handle_smart_copy_compression_switch(
+fn handle_recompression_switch(
     archive_writer: &mut ArchiveWriter<File>,
     current_copy_mode: bool,
     entry_full_path: &Path,
     compression_methods: &Vec<EncoderConfiguration>,
     copy_methods: &Vec<EncoderConfiguration>,
-    target_config: &TargetConfig,
+    source_config: &SourceConfig,
 ) -> bool {
-    let copy_without_compression = should_copy_without_compression(entry_full_path, target_config);
+    let copy_without_compression = should_copy_without_compression(entry_full_path, source_config);
 
     if current_copy_mode != copy_without_compression {
         let methods = if copy_without_compression {
@@ -218,8 +218,8 @@ const USUALLY_COMPRESSED_EXTENSIONS: &[&str] = &[
     "woff2", "xlsx", "xltx", "xpi", "xz", "z", "zip", "zipx", "zst",
 ];
 
-fn should_copy_without_compression(path: &Path, target_config: &TargetConfig) -> bool {
-    if !target_config.smart_copy_compressed_files {
+fn should_copy_without_compression(path: &Path, source_config: &SourceConfig) -> bool {
+    if !source_config.skip_recompression_for_known_formats {
         return false;
     }
     let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
@@ -235,9 +235,9 @@ fn build_archive_path(app_config: &AppConfig) -> PathBuf {
     let now = chrono::Utc::now();
     let filename = format!(
         "{}{}.{}",
-        app_config.compressed_file_name_prefix,
+        app_config.archive_name_prefix,
         now.format("%Y-%m-%d_%H-%M-%S"),
-        app_config.compression.method.extension()
+        app_config.compression.algorithm.extension()
     );
     app_config.output_folder.join(filename)
 }

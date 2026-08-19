@@ -9,9 +9,7 @@ use std::hash::Hash;
 
 #[derive(Debug, Clone)]
 pub struct PathGlob {
-    raw_pattern: String,
     normalized_pattern: String,
-    normalized_segments: Vec<String>,
     prefix_regex: Regex,
     regex: Regex,
 }
@@ -111,17 +109,11 @@ impl<'de> Deserialize<'de> for PathGlobSet {
 fn build_glob(glob: &str) -> Result<PathGlob> {
     let normalized_glob = normalize_path(glob);
     validate_glob(&normalized_glob)?;
-
     let regex = glob_to_regex(&normalized_glob)?;
     let prefix_regex = glob_to_prefix_regex(&normalized_glob)?;
-    let normalized_segments = normalized_glob
-        .split(PATH_SEPARATOR)
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
+
     Ok(PathGlob {
-        raw_pattern: glob.to_string(),
         normalized_pattern: normalized_glob.to_string(),
-        normalized_segments,
         prefix_regex,
         regex,
     })
@@ -292,13 +284,11 @@ mod tests {
         use crate::util::INVERTED_PATH_SEPARATOR;
 
         #[test]
-        fn build_glob_keeps_the_raw_pattern_and_uses_the_normalized_form() {
+        fn build_glob_converts_the_raw_pattern_and_into_the_normalized_form() {
             let raw = format!("src{0}{0}*.rs", INVERTED_PATH_SEPARATOR);
             let glob = build_glob(&raw).unwrap();
 
-            assert_eq!(glob.raw_pattern, raw);
             assert_eq!(glob.normalized_pattern, path(&["src", "*.rs"]));
-            assert_eq!(glob.normalized_segments, ["src", "*.rs"]);
             assert_eq!(glob.to_string(), path(&["src", "*.rs"]));
         }
     }
