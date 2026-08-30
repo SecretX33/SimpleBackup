@@ -87,7 +87,7 @@ jobs:
           if [ "$os_name" = "windows" ]; then
             runs_on_os_name=windows-latest
           elif [ "$os_name" = "linux" ]; then
-            runs_on_os_name=ubuntu-22.04
+            runs_on_os_name=ubuntu-latest
           elif [ "$os_name" = "macos" ]; then
             runs_on_os_name=macos-latest
           else 
