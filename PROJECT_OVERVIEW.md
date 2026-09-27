@@ -19,7 +19,7 @@ From a user's perspective, SimpleBackup lets you describe a backup job once in a
 - Save time and processing power by storing files such as JPEG images, videos, and ZIP archives without attempting to compress them again.
 - Prevent overly frequent backups by defining a minimum time between successful archive timestamps.
 - Keep storage usage under control by retaining only a chosen number of recent backups or removing backups after a chosen age.
-- Optionally detect identical 7z archives and keep a full copy, link to existing data, or skip the new backup.
+- Optionally detect identical 7z archives and link to existing data or skip the new backup.
 - Recover files with any compatible 7z extraction application.
 
 ### Example uses
@@ -91,7 +91,6 @@ With the default prefix, an example filename is `backup_2026-08-30_14-25-10.7z`.
   "min_backup_interval": "12h",
   "archive_name_prefix": "documents_",
   "duplicate_backup_action": "HardLink",
-  "store_creation_and_modification_times": false,
   "compression": {
     "algorithm": "lzma2",
     "level": 7
@@ -111,7 +110,7 @@ Exclude patterns take precedence over include patterns. Patterns are relative to
 
 SimpleBackup only manages files in the output directory that match its configured archive prefix, timestamp format, and supported extension. `keep_last` retains the newest matching archives, while `max_age` removes matching archives older than the specified duration. When both options are present, a file selected by either rule is moved to trash.
 
-The optional `duplicate_backup_action` accepts `Skip`, `Copy`, `SymbolicLink`, or `HardLink` without regard to case. It compares complete archive hashes with the latest backup. Access times are never saved. The optional `store_creation_and_modification_times` flag defaults to `true`; setting it to `false` can improve duplicate matches by omitting those timestamps, but restored files will not retain them.
+The optional `duplicate_backup_action` accepts `Skip`, `SymbolicLink`, or `HardLink` without regard to case. When omitted, every due backup is saved without hashing. When set, it compares complete archive hashes with the latest backup. Access times are never saved. The optional `store_creation_and_modification_times` flag defaults to `false` when duplicate handling is enabled and `true` otherwise; an explicit value overrides the default. Omitting those timestamps improves duplicate matches, but restored files will not retain them.
 
 ## Project structure
 

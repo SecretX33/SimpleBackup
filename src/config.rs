@@ -96,7 +96,6 @@ pub enum CompressionAlgorithm {
 #[derive(Debug, Clone, Copy)]
 pub enum DuplicateBackupAction {
     Skip,
-    Copy,
     SymbolicLink,
     HardLink,
 }
@@ -108,11 +107,10 @@ impl<'de> Deserialize<'de> for DuplicateBackupAction {
     {
         match String::deserialize(deserializer)?.to_lowercase().as_str() {
             "skip" => Ok(Self::Skip),
-            "copy" => Ok(Self::Copy),
             "symboliclink" => Ok(Self::SymbolicLink),
             "hardlink" => Ok(Self::HardLink),
             _ => Err(Error::custom(
-                "duplicate_backup_action must be one of 'Skip', 'Copy', 'SymbolicLink', or 'HardLink'",
+                "duplicate_backup_action must be one of 'Skip', 'SymbolicLink', or 'HardLink'",
             )),
         }
     }
@@ -192,6 +190,11 @@ impl TryFrom<RawAppConfig> for AppConfig {
             bail!("'compression.level' must be a value between 0 and 9");
         }
 
+        let duplicate_backup_action = value.duplicate_backup_action;
+        let store_creation_and_modification_times = value
+            .store_creation_and_modification_times
+            .unwrap_or(duplicate_backup_action.is_none());
+
         Ok(Self {
             output_folder,
             sources,
@@ -203,10 +206,8 @@ impl TryFrom<RawAppConfig> for AppConfig {
                 .archive_name_prefix
                 .unwrap_or_else(|| "backup_".to_string()),
             compression: value.compression.unwrap_or_default(),
-            duplicate_backup_action: value.duplicate_backup_action,
-            store_creation_and_modification_times: value
-                .store_creation_and_modification_times
-                .unwrap_or(true),
+            duplicate_backup_action,
+            store_creation_and_modification_times,
         })
     }
 }

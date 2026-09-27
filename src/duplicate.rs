@@ -36,7 +36,6 @@ pub fn handle_duplicate(
     }
 
     let result = match action {
-        DuplicateBackupAction::Copy => Ok(()),
         DuplicateBackupAction::Skip => trash::delete(new_backup).map_err(io::Error::other),
         DuplicateBackupAction::HardLink | DuplicateBackupAction::SymbolicLink => {
             resolve_real_backup(&previous_backup.0, &config.output_folder)
@@ -45,7 +44,7 @@ pub fn handle_duplicate(
     };
     match result {
         Ok(()) => log!("Duplicate backup handled with {:?}", action),
-        Err(error) => log!("Could not handle duplicate backup, keeping a full copy: {error}"),
+        Err(error) => log!("Could not handle duplicate backup, keeping the full archive: {error}"),
     }
 }
 

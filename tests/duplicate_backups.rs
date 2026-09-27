@@ -83,7 +83,7 @@ impl Drop for Fixture {
 #[test]
 fn access_time_changes_still_produce_a_hard_link_duplicate() {
     let fixture = Fixture::new();
-    fixture.run(Some("hArDlInK"), None, None);
+    fixture.run(Some("hArDlInK"), Some(true), None);
     let first = fixture.backups().remove(0);
     let old = fixture.output.join("backup_2020-01-01_00-00-00.7z");
     fs::rename(first, &old).unwrap();
@@ -95,7 +95,7 @@ fn access_time_changes_still_produce_a_hard_link_duplicate() {
         .unwrap()
         .set_times(FileTimes::new().set_accessed(SystemTime::now() - Duration::from_secs(86_400)))
         .unwrap();
-    fixture.run(Some("HardLink"), None, None);
+    fixture.run(Some("HardLink"), Some(true), None);
 
     let backups = fixture.backups();
     assert_eq!(backups.len(), 2);
@@ -114,6 +114,28 @@ fn archive_timestamp_fields_follow_configuration() {
     assert!(!entry.has_access_date);
     assert!(!entry.has_creation_date);
     assert!(!entry.has_last_modified_date);
+}
+
+#[test]
+fn file_time_defaults_follow_duplicate_handling() {
+    let regular = Fixture::new();
+    regular.run(None, None, None);
+    let regular_archive = sevenz_rust2::Archive::open(regular.backups().remove(0)).unwrap();
+    assert!(!regular_archive.files[0].has_access_date);
+    assert!(regular_archive.files[0].has_last_modified_date);
+
+    let duplicate = Fixture::new();
+    duplicate.run(Some("Skip"), None, None);
+    let duplicate_archive = sevenz_rust2::Archive::open(duplicate.backups().remove(0)).unwrap();
+    assert!(!duplicate_archive.files[0].has_access_date);
+    assert!(!duplicate_archive.files[0].has_creation_date);
+    assert!(!duplicate_archive.files[0].has_last_modified_date);
+
+    let explicit = Fixture::new();
+    explicit.run(Some("HardLink"), Some(true), None);
+    let explicit_archive = sevenz_rust2::Archive::open(explicit.backups().remove(0)).unwrap();
+    assert!(!explicit_archive.files[0].has_access_date);
+    assert!(explicit_archive.files[0].has_last_modified_date);
 }
 
 #[test]
@@ -174,17 +196,7 @@ fn skip_keeps_a_new_full_backup_when_the_previous_one_expires() {
 }
 
 #[test]
-fn copy_keeps_the_new_archive_and_skip_removes_it() {
-    let copy = Fixture::new();
-    copy.run(Some("Copy"), None, None);
-    fs::rename(
-        copy.backups().remove(0),
-        copy.output.join("backup_2020-01-01_00-00-00.7z"),
-    )
-    .unwrap();
-    copy.run(Some("Copy"), None, None);
-    assert_eq!(copy.backups().len(), 2);
-
+fn skip_removes_the_duplicate_archive() {
     let skip = Fixture::new();
     skip.run(Some("Skip"), None, None);
     let old = skip.output.join("backup_2020-01-01_00-00-00.7z");
