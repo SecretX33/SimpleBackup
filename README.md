@@ -62,6 +62,8 @@ Note: relative paths are resolved from the directory where the app is run, not f
   ],
   "min_backup_interval": "12h",
   "archive_name_prefix": "documents_",
+  "duplicate_backup_action": "HardLink",
+  "store_creation_and_modification_times": false,
   "follow_symlinks": false,
   "skip_recompression_for_known_formats": true,
   "compression": {
@@ -87,6 +89,8 @@ Top-level options:
 | `retention` | No |                 | Rules for removing older recognized archives. |
 | `archive_name_prefix` | No | `backup_`       | Prefix added before the archive timestamp. It must not be empty. |
 | `compression` | No | Deflate, level 5 | Compression algorithm and level. |
+| `duplicate_backup_action` | No | Disabled | Case-insensitive action for an archive identical to the latest backup: `Skip`, `Copy`, `SymbolicLink`, or `HardLink`. |
+| `store_creation_and_modification_times` | No | `true` | Store source file creation and modification times in the archive. Access times are never stored. |
 
 Each item in `sources` accepts:
 
@@ -105,7 +109,11 @@ Glob patterns are matched against paths relative to their source. `?` matches on
 
 Retention accepts `keep_last`, which keeps the newest specified number of recognized archives, and `max_age`, which moves archives older than a duration such as `30days` to the operating system's trash. If both are provided, an archive selected by either cleanup rule is moved to the trash.
 
-Compression accepts `algorithm` and `level`. The algorithms are `deflate`, `lzma2`, and `ppmd`, matched case-insensitively. The level must be from 0 through 9. Deflate currently produces a filename ending in `.zip`; LZMA2 and PPMd produce filenames ending in `.7z`.
+Compression accepts `algorithm` and `level`. The algorithms are `deflate`, `lzma2`, and `ppmd`, matched case-insensitively. The level must be from 0 through 9. All three produce `.7z` archives.
+
+When `duplicate_backup_action` is set, SimpleBackup hashes the finished archive and compares it with the latest recognized backup. A matching hash means the complete archive bytes match, including stored metadata. `Skip` sends the new archive to the operating system trash, `Copy` keeps the new full archive, and `SymbolicLink` and `HardLink` replace it with a link to the existing data. Storage used by a skipped archive is reclaimed when the trash is emptied. If `max_age` would remove the previous backup during the same run, `Skip` keeps the new full archive. With `Skip`, no new dated backup is saved, so `min_backup_interval` continues to use the previous backup's date. Retention promotes a surviving symbolic link to a real archive before removing its data source. If hashing or the duplicate action fails, the new full archive is kept.
+
+Access times are never stored in new archives. Set `store_creation_and_modification_times` to `false` to omit the other two file timestamps. This can improve duplicate matches when combined with `duplicate_backup_action`, but restored files will not retain their original creation or modification times. Existing archives remain usable, though their stored timestamps may keep them from matching a new archive byte for byte.
 
 ## Building from Source
 

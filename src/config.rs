@@ -20,6 +20,8 @@ struct RawAppConfig {
     pub retention: Option<RetentionConfig>,
     pub archive_name_prefix: Option<String>,
     pub compression: Option<CompressionOptions>,
+    pub duplicate_backup_action: Option<DuplicateBackupAction>,
+    pub store_creation_and_modification_times: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -43,6 +45,8 @@ pub struct AppConfig {
     pub retention: Option<RetentionConfig>,
     pub archive_name_prefix: String,
     pub compression: CompressionOptions,
+    pub duplicate_backup_action: Option<DuplicateBackupAction>,
+    pub store_creation_and_modification_times: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +91,31 @@ pub enum CompressionAlgorithm {
     Deflate,
     LZMA2,
     PPMd,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DuplicateBackupAction {
+    Skip,
+    Copy,
+    SymbolicLink,
+    HardLink,
+}
+
+impl<'de> Deserialize<'de> for DuplicateBackupAction {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.to_lowercase().as_str() {
+            "skip" => Ok(Self::Skip),
+            "copy" => Ok(Self::Copy),
+            "symboliclink" => Ok(Self::SymbolicLink),
+            "hardlink" => Ok(Self::HardLink),
+            _ => Err(Error::custom(
+                "duplicate_backup_action must be one of 'Skip', 'Copy', 'SymbolicLink', or 'HardLink'",
+            )),
+        }
+    }
 }
 
 impl CompressionAlgorithm {
@@ -138,7 +167,10 @@ impl TryFrom<RawAppConfig> for AppConfig {
             })
             .collect::<Result<_>>()?;
 
-        if let Some(source) = sources.iter().find(|source| output_folder.starts_with(&source.path)) {
+        if let Some(source) = sources
+            .iter()
+            .find(|source| output_folder.starts_with(&source.path))
+        {
             bail!(
                 "Output folder must not be contained by any source folder to avoid infinite recursion. Source folder: {}. Output folder: {}",
                 source.path.display(),
@@ -171,6 +203,10 @@ impl TryFrom<RawAppConfig> for AppConfig {
                 .archive_name_prefix
                 .unwrap_or_else(|| "backup_".to_string()),
             compression: value.compression.unwrap_or_default(),
+            duplicate_backup_action: value.duplicate_backup_action,
+            store_creation_and_modification_times: value
+                .store_creation_and_modification_times
+                .unwrap_or(true),
         })
     }
 }
