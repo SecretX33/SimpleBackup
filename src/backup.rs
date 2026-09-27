@@ -1,5 +1,8 @@
-use crate::config::{AppConfig, CompressionAlgorithm, CompressionOptions, SourceConfig};
-use crate::cleanup::{ISO_DATETIME_FORMAT, last_backup_time};
+use crate::cleanup::{ISO_DATETIME_FORMAT, last_backup_time, latest_backup};
+use crate::config::{
+    AppConfig, CompressionAlgorithm, CompressionOptions, IncludeTimestamps, SourceConfig,
+};
+use crate::duplicate::handle_duplicate;
 use crate::{debug_log, log};
 use color_eyre::eyre::bail;
 use color_eyre::{Result, eyre};
@@ -17,15 +20,28 @@ pub fn run_backup(app_config: &AppConfig) {
     }
 
     let start_time = Instant::now();
+    let previous_backup = if app_config.duplicate_backup_action.is_some() {
+        latest_backup(app_config)
+    } else {
+        None
+    };
     let archive_path = build_archive_path(app_config);
-    let mut archive_writer = create_archive_writer(archive_path.as_path(), app_config)
-        .expect("Could not create archive writer");
+    let mut archive_writer = match create_archive_writer(archive_path.as_path(), app_config) {
+        Ok(writer) => writer,
+        Err(error) => {
+            log!("Could not create archive writer: {error}");
+            return;
+        }
+    };
     log!("Starting backup to '{}'", archive_path.display());
 
     for source_config in &app_config.sources {
-        if let Err(err) =
-            run_backup_for_source(source_config, &app_config.compression, &mut archive_writer)
-        {
+        if let Err(err) = run_backup_for_source(
+            source_config,
+            &app_config.compression,
+            app_config.include_timestamps,
+            &mut archive_writer,
+        ) {
             log!(
                 "Error running backup for source '{}': {}",
                 source_config.path.display(),
@@ -38,9 +54,14 @@ pub fn run_backup(app_config: &AppConfig) {
         }
     }
 
-    archive_writer
-        .finish()
-        .expect("Could not finish archive writer");
+    if let Err(error) = archive_writer.finish() {
+        log!("Could not finish archive writer: {error}");
+        let _ = std::fs::remove_file(&archive_path);
+        return;
+    }
+    if let Some(previous_backup) = previous_backup {
+        handle_duplicate(app_config, &archive_path, &previous_backup);
+    }
     log!(
         "Backup completed successfully in {}s",
         (start_time.elapsed().as_millis() as f64 / 100.0).floor() / 10.0
@@ -48,8 +69,12 @@ pub fn run_backup(app_config: &AppConfig) {
 }
 
 fn backup_is_due(app_config: &AppConfig) -> bool {
-    let Some(backup_interval) = app_config.min_backup_interval else { return true };
-    let Some(last_backup_date) = last_backup_time(app_config) else { return true };
+    let Some(backup_interval) = app_config.min_backup_interval else {
+        return true;
+    };
+    let Some(last_backup_date) = last_backup_time(app_config) else {
+        return true;
+    };
 
     let now = chrono::Local::now();
     let cutoff_date = now - backup_interval;
@@ -59,6 +84,7 @@ fn backup_is_due(app_config: &AppConfig) -> bool {
 fn run_backup_for_source(
     source_config: &SourceConfig,
     compression_options: &CompressionOptions,
+    include_timestamps: IncludeTimestamps,
     archive_writer: &mut ArchiveWriter<File>,
 ) -> Result<()> {
     let base_path = source_config.path.as_path();
@@ -103,7 +129,11 @@ fn run_backup_for_source(
         };
         let is_folder = entry.file_type().is_dir();
 
-        if is_excluded(source_config, &entry_relative_path.to_string_lossy(), is_folder) {
+        if is_excluded(
+            source_config,
+            &entry_relative_path.to_string_lossy(),
+            is_folder,
+        ) {
             handle_excluded_entry(&mut walker, entry_relative_path, is_folder);
             continue;
         }
@@ -128,8 +158,13 @@ fn run_backup_for_source(
         );
         log!("Adding file '{}' to compressed file", file_name);
 
+        let mut archive_entry = ArchiveEntry::from_path(entry_full_path, file_name);
+        archive_entry.has_creation_date &= include_timestamps.creation;
+        archive_entry.has_last_modified_date &= include_timestamps.modification;
+        archive_entry.has_access_date &= include_timestamps.access;
+
         archive_writer.push_archive_entry(
-            ArchiveEntry::from_path(entry_full_path, file_name),
+            archive_entry,
             Some(File::open(entry_full_path).map_err(|e| {
                 eyre::eyre!("Could not open file '{}': {}", entry_full_path.display(), e)
             })?),
@@ -180,10 +215,13 @@ fn is_excluded(config: &SourceConfig, relative_path: &str, is_folder: bool) -> b
     {
         return true;
     }
-    config
-        .include
-        .as_ref()
-        .is_some_and(|set| if is_folder { !set.accepts_prefix(relative_path) } else { !set.is_match(relative_path) })
+    config.include.as_ref().is_some_and(|set| {
+        if is_folder {
+            !set.accepts_prefix(relative_path)
+        } else {
+            !set.is_match(relative_path)
+        }
+    })
 }
 
 fn handle_excluded_entry(walker: &mut IntoIter, entry_relative_path: &Path, is_folder: bool) {
@@ -264,9 +302,14 @@ fn create_archive_writer(
     if let Some(parent) = destination.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    File::create(destination)?;
-
-    let mut writer = ArchiveWriter::create(destination)?;
+    let file = File::create_new(destination)?;
+    let mut writer = match ArchiveWriter::new(file) {
+        Ok(writer) => writer,
+        Err(error) => {
+            let _ = std::fs::remove_file(destination);
+            return Err(error.into());
+        }
+    };
     writer.set_content_methods(create_compression_methods(&app_config.compression));
     Ok(writer)
 }

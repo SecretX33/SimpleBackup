@@ -20,6 +20,23 @@ struct RawAppConfig {
     pub retention: Option<RetentionConfig>,
     pub archive_name_prefix: Option<String>,
     pub compression: Option<CompressionOptions>,
+    pub duplicate_backup_action: Option<DuplicateBackupAction>,
+    pub include_timestamps: Option<RawIncludeTimestamps>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RawIncludeTimestamps {
+    All(bool),
+    Fields(RawIncludeTimestampFields),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawIncludeTimestampFields {
+    creation: Option<bool>,
+    modification: Option<bool>,
+    access: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -43,6 +60,15 @@ pub struct AppConfig {
     pub retention: Option<RetentionConfig>,
     pub archive_name_prefix: String,
     pub compression: CompressionOptions,
+    pub duplicate_backup_action: Option<DuplicateBackupAction>,
+    pub include_timestamps: IncludeTimestamps,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IncludeTimestamps {
+    pub creation: bool,
+    pub modification: bool,
+    pub access: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +113,29 @@ pub enum CompressionAlgorithm {
     Deflate,
     LZMA2,
     PPMd,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DuplicateBackupAction {
+    Skip,
+    SymbolicLink,
+    HardLink,
+}
+
+impl<'de> Deserialize<'de> for DuplicateBackupAction {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.to_lowercase().as_str() {
+            "skip" => Ok(Self::Skip),
+            "symboliclink" => Ok(Self::SymbolicLink),
+            "hardlink" => Ok(Self::HardLink),
+            _ => Err(Error::custom(
+                "duplicate_backup_action must be one of 'Skip', 'SymbolicLink', or 'HardLink'",
+            )),
+        }
+    }
 }
 
 impl CompressionAlgorithm {
@@ -138,7 +187,10 @@ impl TryFrom<RawAppConfig> for AppConfig {
             })
             .collect::<Result<_>>()?;
 
-        if let Some(source) = sources.iter().find(|source| output_folder.starts_with(&source.path)) {
+        if let Some(source) = sources
+            .iter()
+            .find(|source| output_folder.starts_with(&source.path))
+        {
             bail!(
                 "Output folder must not be contained by any source folder to avoid infinite recursion. Source folder: {}. Output folder: {}",
                 source.path.display(),
@@ -160,6 +212,23 @@ impl TryFrom<RawAppConfig> for AppConfig {
             bail!("'compression.level' must be a value between 0 and 9");
         }
 
+        let duplicate_backup_action = value.duplicate_backup_action;
+        let timestamps = match value.include_timestamps {
+            Some(RawIncludeTimestamps::All(include)) => RawIncludeTimestampFields {
+                creation: Some(include),
+                modification: Some(include),
+                access: Some(include),
+            },
+            Some(RawIncludeTimestamps::Fields(fields)) => fields,
+            None => RawIncludeTimestampFields::default(),
+        };
+        let default_store_other_times = duplicate_backup_action.is_none();
+        let include_timestamps = IncludeTimestamps {
+            creation: timestamps.creation.unwrap_or(true),
+            modification: timestamps.modification.unwrap_or(default_store_other_times),
+            access: timestamps.access.unwrap_or(default_store_other_times),
+        };
+
         Ok(Self {
             output_folder,
             sources,
@@ -171,6 +240,8 @@ impl TryFrom<RawAppConfig> for AppConfig {
                 .archive_name_prefix
                 .unwrap_or_else(|| "backup_".to_string()),
             compression: value.compression.unwrap_or_default(),
+            duplicate_backup_action,
+            include_timestamps,
         })
     }
 }
