@@ -116,15 +116,15 @@ The optional `duplicate_backup_action` accepts `Skip`, `SymbolicLink`, or `HardL
 
 | Path | Responsibility |
 | --- | --- |
-| `src/main.rs` | Application entry point and top-level backup workflow. |
-| `src/config.rs` | JSON parsing, defaults, validation, and resolved configuration types. |
-| `src/backup.rs` | Directory traversal, file selection, archive creation, and compression behavior. |
-| `src/cleanup.rs` | Existing backup discovery, interval checks, and retention cleanup. |
-| `src/duplicate.rs` | Archive hash comparison, duplicate actions, and symbolic-link promotion. |
-| `src/path_glob.rs` | Cross-platform, case-insensitive path glob parsing and matching. |
-| `src/util.rs` | Path normalization and shared path utilities. |
-| `src/log_macros.rs` | Lightweight application logging macros. |
-| `Cargo.toml` | Rust package metadata, dependencies, and build profiles. |
+| `../src/main.rs` | Application entry point and top-level backup workflow. |
+| `../src/config.rs` | JSON parsing, defaults, validation, and resolved configuration types. |
+| `../src/backup.rs` | Directory traversal, file selection, archive creation, and compression behavior. |
+| `../src/cleanup.rs` | Existing backup discovery, interval checks, and retention cleanup. |
+| `../src/duplicate.rs` | Archive hash comparison, duplicate actions, and symbolic-link promotion. |
+| `../src/path_glob.rs` | Cross-platform, case-insensitive path glob parsing and matching. |
+| `../src/util.rs` | Path normalization and shared path utilities. |
+| `../src/log_macros.rs` | Lightweight application logging macros. |
+| `../Cargo.toml` | Rust package metadata, dependencies, and build profiles. |
 
 ## Technology
 
@@ -140,7 +140,7 @@ Install the stable Rust toolchain, clone the repository, and run:
 cargo build --release
 ```
 
-The optimized executable is produced under `target/release`.
+The optimized executable is produced under `../target/release`.
 
 ## Intended use
 
