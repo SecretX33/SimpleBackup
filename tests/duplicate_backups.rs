@@ -32,7 +32,7 @@ impl Fixture {
     fn run(
         &self,
         action: Option<&str>,
-        store_times: Option<bool>,
+        include_timestamps: Option<serde_json::Value>,
         retention: Option<serde_json::Value>,
     ) {
         let config = self.root.join("config.json");
@@ -40,8 +40,8 @@ impl Fixture {
         if let Some(action) = action {
             value["duplicate_backup_action"] = action.into();
         }
-        if let Some(store_times) = store_times {
-            value["store_creation_and_modification_times"] = store_times.into();
+        if let Some(include_timestamps) = include_timestamps {
+            value["include_timestamps"] = include_timestamps;
         }
         if let Some(retention) = retention {
             value["retention"] = retention;
@@ -74,6 +74,14 @@ impl Fixture {
     }
 }
 
+fn all_file_times(value: bool) -> serde_json::Value {
+    serde_json::json!({
+        "creation": value,
+        "modification": value,
+        "access": value,
+    })
+}
+
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
@@ -83,7 +91,12 @@ impl Drop for Fixture {
 #[test]
 fn access_time_changes_still_produce_a_hard_link_duplicate() {
     let fixture = Fixture::new();
-    fixture.run(Some("hArDlInK"), Some(true), None);
+    let timestamps = serde_json::json!({
+        "creation": true,
+        "modification": true,
+        "access": false,
+    });
+    fixture.run(Some("hArDlInK"), Some(timestamps.clone()), None);
     let first = fixture.backups().remove(0);
     let old = fixture.output.join("backup_2020-01-01_00-00-00.7z");
     fs::rename(first, &old).unwrap();
@@ -95,7 +108,7 @@ fn access_time_changes_still_produce_a_hard_link_duplicate() {
         .unwrap()
         .set_times(FileTimes::new().set_accessed(SystemTime::now() - Duration::from_secs(86_400)))
         .unwrap();
-    fixture.run(Some("HardLink"), Some(true), None);
+    fixture.run(Some("HardLink"), Some(timestamps), None);
 
     let backups = fixture.backups();
     assert_eq!(backups.len(), 2);
@@ -108,7 +121,7 @@ fn access_time_changes_still_produce_a_hard_link_duplicate() {
 #[test]
 fn archive_timestamp_fields_follow_configuration() {
     let fixture = Fixture::new();
-    fixture.run(None, Some(false), None);
+    fixture.run(None, Some(all_file_times(false)), None);
     let archive = sevenz_rust2::Archive::open(fixture.backups().remove(0)).unwrap();
     let entry = &archive.files[0];
     assert!(!entry.has_access_date);
@@ -118,30 +131,85 @@ fn archive_timestamp_fields_follow_configuration() {
 
 #[test]
 fn file_time_defaults_follow_duplicate_handling() {
-    let regular = Fixture::new();
-    regular.run(None, None, None);
-    let regular_archive = sevenz_rust2::Archive::open(regular.backups().remove(0)).unwrap();
-    assert!(!regular_archive.files[0].has_access_date);
-    assert!(regular_archive.files[0].has_last_modified_date);
+    let cases = [
+        (None, None, true, true, true),
+        (None, Some(serde_json::json!(false)), false, false, false),
+        (None, Some(serde_json::json!(true)), true, true, true),
+        (None, Some(serde_json::json!({})), true, true, true),
+        (
+            None,
+            Some(serde_json::json!({ "modification": false })),
+            true,
+            false,
+            true,
+        ),
+        (Some("Skip"), None, true, false, false),
+        (
+            Some("Skip"),
+            Some(serde_json::json!(false)),
+            false,
+            false,
+            false,
+        ),
+        (
+            Some("Skip"),
+            Some(serde_json::json!(true)),
+            true,
+            true,
+            true,
+        ),
+        (
+            Some("Skip"),
+            Some(serde_json::json!({})),
+            true,
+            false,
+            false,
+        ),
+        (
+            Some("Skip"),
+            Some(serde_json::json!({ "modification": true })),
+            true,
+            true,
+            false,
+        ),
+        (
+            Some("Skip"),
+            Some(serde_json::json!({ "access": true })),
+            true,
+            false,
+            true,
+        ),
+        (
+            Some("Skip"),
+            Some(serde_json::json!({ "creation": false })),
+            false,
+            false,
+            false,
+        ),
+    ];
 
-    let duplicate = Fixture::new();
-    duplicate.run(Some("Skip"), None, None);
-    let duplicate_archive = sevenz_rust2::Archive::open(duplicate.backups().remove(0)).unwrap();
-    assert!(!duplicate_archive.files[0].has_access_date);
-    assert!(!duplicate_archive.files[0].has_creation_date);
-    assert!(!duplicate_archive.files[0].has_last_modified_date);
-
-    let explicit = Fixture::new();
-    explicit.run(Some("HardLink"), Some(true), None);
-    let explicit_archive = sevenz_rust2::Archive::open(explicit.backups().remove(0)).unwrap();
-    assert!(!explicit_archive.files[0].has_access_date);
-    assert!(explicit_archive.files[0].has_last_modified_date);
+    for (action, timestamps, creation, modification, access) in cases {
+        let fixture = Fixture::new();
+        let metadata = fs::metadata(fixture.source.join("file.txt")).unwrap();
+        fixture.run(action, timestamps, None);
+        let archive = sevenz_rust2::Archive::open(fixture.backups().remove(0)).unwrap();
+        let entry = &archive.files[0];
+        assert_eq!(
+            entry.has_creation_date,
+            creation && metadata.created().is_ok()
+        );
+        assert_eq!(
+            entry.has_last_modified_date,
+            modification && metadata.modified().is_ok()
+        );
+        assert_eq!(entry.has_access_date, access && metadata.accessed().is_ok());
+    }
 }
 
 #[test]
 fn omitting_file_times_allows_modified_time_changes_to_match() {
     let fixture = Fixture::new();
-    fixture.run(Some("HardLink"), Some(false), None);
+    fixture.run(Some("HardLink"), Some(all_file_times(false)), None);
     let old = fixture.output.join("backup_2020-01-01_00-00-00.7z");
     fs::rename(fixture.backups().remove(0), &old).unwrap();
     File::options()
@@ -150,7 +218,7 @@ fn omitting_file_times_allows_modified_time_changes_to_match() {
         .unwrap()
         .set_times(FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(86_400)))
         .unwrap();
-    fixture.run(Some("HardLink"), Some(false), None);
+    fixture.run(Some("HardLink"), Some(all_file_times(false)), None);
     let latest = fixture
         .backups()
         .into_iter()
@@ -163,11 +231,11 @@ fn omitting_file_times_allows_modified_time_changes_to_match() {
 #[test]
 fn changed_content_does_not_match_when_file_times_are_omitted() {
     let fixture = Fixture::new();
-    fixture.run(Some("HardLink"), Some(false), None);
+    fixture.run(Some("HardLink"), Some(all_file_times(false)), None);
     let old = fixture.output.join("backup_2020-01-01_00-00-00.7z");
     fs::rename(fixture.backups().remove(0), &old).unwrap();
     fs::write(fixture.source.join("file.txt"), b"different content").unwrap();
-    fixture.run(Some("HardLink"), Some(false), None);
+    fixture.run(Some("HardLink"), Some(all_file_times(false)), None);
     let latest = fixture
         .backups()
         .into_iter()

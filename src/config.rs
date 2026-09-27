@@ -21,7 +21,22 @@ struct RawAppConfig {
     pub archive_name_prefix: Option<String>,
     pub compression: Option<CompressionOptions>,
     pub duplicate_backup_action: Option<DuplicateBackupAction>,
-    pub store_creation_and_modification_times: Option<bool>,
+    pub include_timestamps: Option<RawIncludeTimestamps>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RawIncludeTimestamps {
+    All(bool),
+    Fields(RawIncludeTimestampFields),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawIncludeTimestampFields {
+    creation: Option<bool>,
+    modification: Option<bool>,
+    access: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -46,7 +61,14 @@ pub struct AppConfig {
     pub archive_name_prefix: String,
     pub compression: CompressionOptions,
     pub duplicate_backup_action: Option<DuplicateBackupAction>,
-    pub store_creation_and_modification_times: bool,
+    pub include_timestamps: IncludeTimestamps,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IncludeTimestamps {
+    pub creation: bool,
+    pub modification: bool,
+    pub access: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -191,9 +213,21 @@ impl TryFrom<RawAppConfig> for AppConfig {
         }
 
         let duplicate_backup_action = value.duplicate_backup_action;
-        let store_creation_and_modification_times = value
-            .store_creation_and_modification_times
-            .unwrap_or(duplicate_backup_action.is_none());
+        let timestamps = match value.include_timestamps {
+            Some(RawIncludeTimestamps::All(include)) => RawIncludeTimestampFields {
+                creation: Some(include),
+                modification: Some(include),
+                access: Some(include),
+            },
+            Some(RawIncludeTimestamps::Fields(fields)) => fields,
+            None => RawIncludeTimestampFields::default(),
+        };
+        let default_store_other_times = duplicate_backup_action.is_none();
+        let include_timestamps = IncludeTimestamps {
+            creation: timestamps.creation.unwrap_or(true),
+            modification: timestamps.modification.unwrap_or(default_store_other_times),
+            access: timestamps.access.unwrap_or(default_store_other_times),
+        };
 
         Ok(Self {
             output_folder,
@@ -207,7 +241,7 @@ impl TryFrom<RawAppConfig> for AppConfig {
                 .unwrap_or_else(|| "backup_".to_string()),
             compression: value.compression.unwrap_or_default(),
             duplicate_backup_action,
-            store_creation_and_modification_times,
+            include_timestamps,
         })
     }
 }

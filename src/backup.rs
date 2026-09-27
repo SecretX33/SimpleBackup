@@ -1,5 +1,7 @@
 use crate::cleanup::{ISO_DATETIME_FORMAT, last_backup_time, latest_backup};
-use crate::config::{AppConfig, CompressionAlgorithm, CompressionOptions, SourceConfig};
+use crate::config::{
+    AppConfig, CompressionAlgorithm, CompressionOptions, IncludeTimestamps, SourceConfig,
+};
 use crate::duplicate::handle_duplicate;
 use crate::{debug_log, log};
 use color_eyre::eyre::bail;
@@ -37,7 +39,7 @@ pub fn run_backup(app_config: &AppConfig) {
         if let Err(err) = run_backup_for_source(
             source_config,
             &app_config.compression,
-            app_config.store_creation_and_modification_times,
+            app_config.include_timestamps,
             &mut archive_writer,
         ) {
             log!(
@@ -82,7 +84,7 @@ fn backup_is_due(app_config: &AppConfig) -> bool {
 fn run_backup_for_source(
     source_config: &SourceConfig,
     compression_options: &CompressionOptions,
-    store_creation_and_modification_times: bool,
+    include_timestamps: IncludeTimestamps,
     archive_writer: &mut ArchiveWriter<File>,
 ) -> Result<()> {
     let base_path = source_config.path.as_path();
@@ -157,11 +159,9 @@ fn run_backup_for_source(
         log!("Adding file '{}' to compressed file", file_name);
 
         let mut archive_entry = ArchiveEntry::from_path(entry_full_path, file_name);
-        archive_entry.has_access_date = false;
-        if !store_creation_and_modification_times {
-            archive_entry.has_creation_date = false;
-            archive_entry.has_last_modified_date = false;
-        }
+        archive_entry.has_creation_date &= include_timestamps.creation;
+        archive_entry.has_last_modified_date &= include_timestamps.modification;
+        archive_entry.has_access_date &= include_timestamps.access;
 
         archive_writer.push_archive_entry(
             archive_entry,

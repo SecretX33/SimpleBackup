@@ -44,7 +44,7 @@ SimpleBackup reports its progress in the terminal, including skipped runs, files
 - Skips a run when the configured minimum interval has not elapsed since the latest recognized backup.
 - Removes old backups according to a retained count, a maximum age, or both.
 - Sends removed archives to the operating system trash instead of permanently deleting them.
-- Omits access times from new archives and can optionally omit creation and modification times to improve byte-for-byte duplicate matching.
+- Configures creation, modification, and access timestamps independently, with defaults that improve byte-for-byte duplicate matching when duplicate handling is enabled.
 
 ## How it works
 
@@ -60,7 +60,7 @@ During a run, SimpleBackup performs the following work:
 2. Finds existing archives whose names match the configured prefix and timestamp format.
 3. Skips archive creation if `min_backup_interval` is set and a recent backup already exists.
 4. Walks each source directory while applying depth, symbolic link, include, and exclude rules.
-5. Writes matching files to a new 7z archive using the selected compression algorithm, without storing access times.
+5. Writes matching files to a new 7z archive using the selected compression algorithm and timestamp settings.
 6. If duplicate handling is enabled, hashes the finished archive and compares it with the latest recognized backup.
 7. Removes an incomplete archive if processing a source fails.
 8. Applies retention rules to recognized archives after the backup attempt, promoting symbolic links when their original archive is removed.
@@ -110,7 +110,7 @@ Exclude patterns take precedence over include patterns. Patterns are relative to
 
 SimpleBackup only manages files in the output directory that match its configured archive prefix, timestamp format, and supported extension. `keep_last` retains the newest matching archives, while `max_age` removes matching archives older than the specified duration. When both options are present, a file selected by either rule is moved to trash.
 
-The optional `duplicate_backup_action` accepts `Skip`, `SymbolicLink`, or `HardLink` without regard to case. When omitted, every due backup is saved without hashing. When set, it compares complete archive hashes with the latest backup. Access times are never saved. The optional `store_creation_and_modification_times` flag defaults to `false` when duplicate handling is enabled and `true` otherwise; an explicit value overrides the default. Omitting those timestamps improves duplicate matches, but restored files will not retain them.
+The optional `duplicate_backup_action` accepts `Skip`, `SymbolicLink`, or `HardLink` without regard to case. When omitted, every due backup is saved without hashing. When set, it compares complete archive hashes with the latest backup. The optional `include_timestamps` setting accepts a Boolean for all three timestamps or an object with `creation`, `modification`, and `access` fields. All three default to `true` without duplicate handling. With duplicate handling, creation defaults to `true` and modification and access default to `false`. Explicit fields override those defaults independently, and restored files cannot retain timestamps omitted from the archive.
 
 ## Project structure
 

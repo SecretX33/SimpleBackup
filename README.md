@@ -89,7 +89,7 @@ Top-level options:
 | `archive_name_prefix` | No | `backup_`       | Prefix added before the archive timestamp. It must not be empty. |
 | `compression` | No | Deflate, level 5 | Compression algorithm and level. |
 | `duplicate_backup_action` | No | Disabled | Case-insensitive action for an archive identical to the latest backup: `Skip`, `SymbolicLink`, or `HardLink`. |
-| `store_creation_and_modification_times` | No | `true` without duplicate handling, `false` with it | Store source file creation and modification times in the archive. Access times are never stored. |
+| `include_timestamps` | No | Depends on duplicate handling | Boolean for all source file timestamps, or an object controlling each timestamp. |
 
 Each item in `sources` accepts:
 
@@ -112,7 +112,7 @@ Compression accepts `algorithm` and `level`. The algorithms are `deflate`, `lzma
 
 Omit `duplicate_backup_action` to keep every due backup without hashing. When it is set, SimpleBackup hashes the finished archive and compares it with the latest recognized backup. A matching hash means the complete archive bytes match, including stored metadata. `Skip` sends the new archive to the operating system trash, while `SymbolicLink` and `HardLink` replace it with a link to the existing data. Storage used by a skipped archive is reclaimed when the trash is emptied. If `max_age` would remove the previous backup during the same run, `Skip` keeps the new full archive. With `Skip`, no new dated backup is saved, so `min_backup_interval` continues to use the previous backup's date. Retention promotes a surviving symbolic link to a real archive before removing its data source. If hashing or the duplicate action fails, the new full archive is kept.
 
-Access times are never stored in new archives. When `duplicate_backup_action` is set, creation and modification times are also omitted by default to improve duplicate matches. Set `store_creation_and_modification_times` to `true` to retain them, or set it to `false` to omit them when duplicate handling is disabled. Explicit values always take precedence. Restored files cannot retain timestamps that were omitted from the archive. Existing archives remain usable, though their stored timestamps may keep them from matching a new archive byte for byte.
+`include_timestamps` accepts `true` to store all three timestamps or `false` to omit all three. It also accepts an object with optional Boolean `creation`, `modification`, and `access` fields. Without `duplicate_backup_action`, all three default to `true`. With duplicate handling enabled, `creation` defaults to `true` while `modification` and `access` default to `false`, which improves duplicate matches. Each field explicitly set in the object overrides its default; omitted fields keep the default for the selected duplicate mode. For example, `"include_timestamps": { "access": true }` stores creation and access times, plus modification time only when duplicate handling is disabled. Restored files cannot retain timestamps omitted from the archive. Existing archives remain usable, though their stored timestamps may keep them from matching a new archive byte for byte.
 
 ## Building from Source
 
