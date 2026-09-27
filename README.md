@@ -63,6 +63,11 @@ Note: relative paths are resolved from the directory where the app is run, not f
   "min_backup_interval": "12h",
   "archive_name_prefix": "documents_",
   "duplicate_backup_action": "HardLink",
+  "include_timestamps": {
+    "creation": true,
+    "modification": false,
+    "access": false
+  },
   "follow_symlinks": false,
   "skip_recompression_for_known_formats": true,
   "compression": {
