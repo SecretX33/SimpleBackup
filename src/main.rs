@@ -4,6 +4,7 @@ mod config;
 mod duplicate;
 mod log_macros;
 mod path_glob;
+mod schedule;
 mod util;
 
 use crate::backup::run_backup;

@@ -138,10 +138,6 @@ fn list_backup_files(app_config: &AppConfig) -> Vec<BackupFile> {
     backup_files
 }
 
-pub fn last_backup_time(app_config: &AppConfig) -> Option<chrono::DateTime<chrono::Local>> {
-    latest_backup(app_config).map(|(_, date)| date)
-}
-
 pub fn latest_backup(app_config: &AppConfig) -> Option<(PathBuf, chrono::DateTime<chrono::Local>)> {
     list_backup_files(app_config)
         .into_iter()
@@ -154,5 +150,5 @@ fn parse_iso_datetime(date_str: &str) -> Option<chrono::DateTime<chrono::Local>>
     NaiveDateTime::parse_from_str(date_str, ISO_DATETIME_FORMAT)
         .ok()?
         .and_local_timezone(chrono::Local)
-        .single()
+        .earliest()
 }

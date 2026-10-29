@@ -1,8 +1,9 @@
-use crate::cleanup::{ISO_DATETIME_FORMAT, last_backup_time, latest_backup};
+use crate::cleanup::{ISO_DATETIME_FORMAT, latest_backup};
 use crate::config::{
     AppConfig, CompressionAlgorithm, CompressionOptions, IncludeTimestamps, SourceConfig,
 };
 use crate::duplicate::handle_duplicate;
+use crate::schedule::{backup_is_due, record_completion};
 use crate::{debug_log, log};
 use color_eyre::eyre::bail;
 use color_eyre::{Result, eyre};
@@ -59,26 +60,18 @@ pub fn run_backup(app_config: &AppConfig) {
         let _ = std::fs::remove_file(&archive_path);
         return;
     }
-    if let Some(previous_backup) = previous_backup {
-        handle_duplicate(app_config, &archive_path, &previous_backup);
+    if let Some(previous_backup) = &previous_backup {
+        handle_duplicate(app_config, &archive_path, previous_backup);
+    }
+    if archive_path.is_file() {
+        record_completion(app_config, &archive_path);
+    } else if let Some((previous_path, _)) = &previous_backup {
+        record_completion(app_config, previous_path);
     }
     log!(
         "Backup completed successfully in {}s",
         (start_time.elapsed().as_millis() as f64 / 100.0).floor() / 10.0
     );
-}
-
-fn backup_is_due(app_config: &AppConfig) -> bool {
-    let Some(backup_interval) = app_config.min_backup_interval else {
-        return true;
-    };
-    let Some(last_backup_date) = last_backup_time(app_config) else {
-        return true;
-    };
-
-    let now = chrono::Local::now();
-    let cutoff_date = now - backup_interval;
-    last_backup_date < cutoff_date
 }
 
 fn run_backup_for_source(
