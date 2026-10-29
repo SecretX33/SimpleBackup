@@ -17,7 +17,7 @@ From a user's perspective, SimpleBackup lets you describe a backup job once in a
 - Control how deeply SimpleBackup searches through a directory tree.
 - Choose between faster or smaller archives by changing the compression algorithm and level.
 - Save time and processing power by storing files such as JPEG images, videos, and ZIP archives without attempting to compress them again.
-- Prevent overly frequent backups by defining a minimum time between successful archive timestamps.
+- Control backup frequency with local calendar periods or a minimum interval between successful completions.
 - Keep storage usage under control by retaining only a chosen number of recent backups or removing backups after a chosen age.
 - Optionally detect identical 7z archives and link to existing data or skip the new backup.
 - Recover files with any compatible 7z extraction application.
@@ -41,7 +41,7 @@ SimpleBackup reports its progress in the terminal, including skipped runs, files
 - Configures symbolic link traversal globally or per source.
 - Supports Deflate, LZMA2, and PPMd compression at levels 0 through 9.
 - Avoids recompressing formats that are usually already compressed, such as images, videos, office documents, and existing archives.
-- Skips a run when the configured minimum interval has not elapsed since the latest recognized backup.
+- Skips a run when its calendar period is already satisfied or its minimum elapsed interval has not passed.
 - Removes old backups according to a retained count, a maximum age, or both.
 - Sends removed archives to the operating system trash instead of permanently deleting them.
 - Configures creation, modification, and access timestamps independently, with defaults that improve byte-for-byte duplicate matching when duplicate handling is enabled.
@@ -58,11 +58,11 @@ During a run, SimpleBackup performs the following work:
 
 1. Resolves and validates the JSON configuration.
 2. Finds existing archives whose names match the configured prefix and timestamp format.
-3. Skips archive creation if `min_backup_interval` is set and a recent backup already exists.
+3. Checks `schedule` against the last successful completion, falling back to the latest recognized archive timestamp, and skips archive creation if it is not due.
 4. Walks each source directory while applying depth, symbolic link, include, and exclude rules.
 5. Writes matching files to a new 7z archive using the selected compression algorithm and timestamp settings.
 6. If duplicate handling is enabled, hashes the finished archive and compares it with the latest recognized backup.
-7. Removes an incomplete archive if processing a source fails.
+7. Records successful scheduled completions, including skipped duplicates, and removes an incomplete archive if processing a source fails.
 8. Applies retention rules to recognized archives after the backup attempt, promoting symbolic links when their original archive is removed.
 
 Archives use the following naming convention:
@@ -88,7 +88,9 @@ With the default prefix, an example filename is `backup_2026-08-30_14-25-10.7z`.
       "skip_recompression_for_known_formats": true
     }
   ],
-  "min_backup_interval": "12h",
+  "schedule": {
+    "period": "daily"
+  },
   "archive_name_prefix": "documents_",
   "duplicate_backup_action": "HardLink",
   "compression": {
@@ -103,6 +105,8 @@ With the default prefix, an example filename is `backup_2026-08-30_14-25-10.7z`.
 ```
 
 Relative paths are resolved from the process working directory, not from the directory containing the configuration file. The output directory cannot be inside a source directory because that could cause the backup to include itself recursively.
+
+`schedule` accepts exactly one of `period` or `min_interval`. Calendar periods are `secondly`, `minutely`, `hourly`, `daily`, `weekly`, `monthly`, and `yearly`, using local clock and calendar boundaries with weeks starting Monday. A repeated local clock hour counts as the same hourly period. Elapsed intervals accept duration strings such as `"23h"`. Omitting `schedule` creates a backup on every invocation. Missed periods produce one current backup, and failures remain eligible for retry. Successful scheduled runs, including unchanged archives handled with `Skip`, save a completion record in `<archive_name_prefix>schedule.json` in the output folder. Completion state is scoped by output folder and prefix and is used only while it refers to the latest recognized archive. Missing or invalid state falls back to that archive's filename timestamp; without an archive, a backup is always due. The state file is not subject to archive retention.
 
 Exclude patterns take precedence over include patterns. Patterns are relative to their source directory, `?` matches one non-separator character, `*` matches within one path segment, and `**` can cross path separators.
 
@@ -119,7 +123,8 @@ The optional `duplicate_backup_action` accepts `Skip`, `SymbolicLink`, or `HardL
 | `../src/main.rs` | Application entry point and top-level backup workflow. |
 | `../src/config.rs` | JSON parsing, defaults, validation, and resolved configuration types. |
 | `../src/backup.rs` | Directory traversal, file selection, archive creation, and compression behavior. |
-| `../src/cleanup.rs` | Existing backup discovery, interval checks, and retention cleanup. |
+| `../src/cleanup.rs` | Existing backup discovery and retention cleanup. |
+| `../src/schedule.rs` | Calendar and elapsed schedule checks and successful completion records. |
 | `../src/duplicate.rs` | Archive hash comparison, duplicate actions, and symbolic-link promotion. |
 | `../src/path_glob.rs` | Cross-platform, case-insensitive path glob parsing and matching. |
 | `../src/util.rs` | Path normalization and shared path utilities. |

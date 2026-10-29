@@ -13,8 +13,7 @@ use std::path::{Path, PathBuf};
 struct RawAppConfig {
     pub output_folder: String,
     pub sources: Vec<RawSourceConfig>,
-    #[serde(default, deserialize_with = "deserialize_humantime_duration")]
-    pub min_backup_interval: Option<std::time::Duration>,
+    pub schedule: Option<ScheduleConfig>,
     pub follow_symlinks: Option<bool>,
     pub skip_recompression_for_known_formats: Option<bool>,
     pub retention: Option<RetentionConfig>,
@@ -56,7 +55,7 @@ struct RawSourceConfig {
 pub struct AppConfig {
     pub output_folder: PathBuf,
     pub sources: Vec<SourceConfig>,
-    pub min_backup_interval: Option<std::time::Duration>,
+    pub schedule: Option<ScheduleConfig>,
     pub retention: Option<RetentionConfig>,
     pub archive_name_prefix: String,
     pub compression: CompressionOptions,
@@ -69,6 +68,45 @@ pub struct IncludeTimestamps {
     pub creation: bool,
     pub modification: bool,
     pub access: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(try_from = "RawScheduleConfig")]
+pub enum ScheduleConfig {
+    Period(BackupPeriod),
+    MinInterval(std::time::Duration),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawScheduleConfig {
+    period: Option<BackupPeriod>,
+    #[serde(default, deserialize_with = "deserialize_humantime_duration")]
+    min_interval: Option<std::time::Duration>,
+}
+
+impl TryFrom<RawScheduleConfig> for ScheduleConfig {
+    type Error = &'static str;
+
+    fn try_from(value: RawScheduleConfig) -> Result<Self, Self::Error> {
+        match (value.period, value.min_interval) {
+            (Some(period), None) => Ok(Self::Period(period)),
+            (None, Some(interval)) => Ok(Self::MinInterval(interval)),
+            _ => Err("'schedule' must contain exactly one of 'period' or 'min_interval'"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackupPeriod {
+    Secondly,
+    Minutely,
+    Hourly,
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
 }
 
 #[derive(Debug, Clone)]
@@ -232,7 +270,7 @@ impl TryFrom<RawAppConfig> for AppConfig {
         Ok(Self {
             output_folder,
             sources,
-            min_backup_interval: value.min_backup_interval,
+            schedule: value.schedule,
             retention: value
                 .retention
                 .filter(|it| it.max_age.is_some() || it.keep_last.is_some()),

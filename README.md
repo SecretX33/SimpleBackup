@@ -9,9 +9,7 @@ SimpleBackup creates a compressed archive from one or more source directories us
 
 ## Download
 
-SimpleBackup is available for Windows, Linux, and MacOS.
-
-Get the latest version [here](https://github.com/SecretX33/SimpleBackup/releases/latest). Want an older version? Check all releases [here](https://github.com/SecretX33/SimpleBackup/releases).
+Available for Windows, Linux, and macOS. Download the [latest release](https://github.com/SecretX33/SimpleBackup/releases/latest) or browse [all releases](https://github.com/SecretX33/SimpleBackup/releases).
 
 ## Usage
 
@@ -36,7 +34,7 @@ simplebackup <path/to/config.json>
 
 Note: relative paths are resolved from the directory where the app is run, not from the directory containing the configuration file.
 
-### Extended example
+### Full configuration
 
 ```json
 {
@@ -45,22 +43,17 @@ Note: relative paths are resolved from the directory where the app is run, not f
     {
       "path": "path/to/documents",
       "path_in_archive": "some/folder/mydocuments",
-      "include": [
-        "*.txt",
-        "**/*.txt",
-        "*.pdf",
-        "**/*.pdf"
-      ],
-      "exclude": [
-        "temporary/**"
-      ],
+      "include": ["*.txt", "**/*.txt", "*.pdf", "**/*.pdf"],
+      "exclude": ["temporary/**"],
       "min_depth": 1,
       "max_depth": 10,
       "follow_symlinks": true,
       "skip_recompression_for_known_formats": false
     }
   ],
-  "min_backup_interval": "12h",
+  "schedule": {
+    "period": "daily"
+  },
   "archive_name_prefix": "documents_",
   "duplicate_backup_action": "HardLink",
   "include_timestamps": {
@@ -81,13 +74,15 @@ Note: relative paths are resolved from the directory where the app is run, not f
 }
 ```
 
+### Options
+
 Top-level options:
 
-| Option | Required | Default         | Description |
-| --- | --- |-----------------| --- |
+| Option | Required | Default | Description |
+| --- | --- | --- | --- |
 | `output_folder` | Yes |                 | Directory where archives are created. |
 | `sources` | Yes |                 | Non-empty list of source directory configurations. |
-| `min_backup_interval` | No | No minimum      | Minimum time between recognized backups, such as `30m`, `12h`, or `7days`. |
+| `schedule` | No | Every invocation | Calendar period or minimum elapsed interval between successful backups. |
 | `follow_symlinks` | No | `false`         | Global default for following symbolic links while walking sources. |
 | `skip_recompression_for_known_formats` | No | `false`         | Stores commonly compressed file formats without recompressing them. |
 | `retention` | No |                 | Rules for removing older recognized archives. |
@@ -109,15 +104,85 @@ Each item in `sources` accepts:
 | `follow_symlinks` | No | Global value | Overrides the global symbolic link setting for this source. |
 | `skip_recompression_for_known_formats` | No | Global value | Overrides the global recompression setting for this source. |
 
-Glob patterns are matched against paths relative to their source. `?` matches one non-separator character, `*` matches within one path segment, and `**` can match across path separators. Matching is case-insensitive.
+Glob patterns are matched against paths relative to their source: `?` matches one non-separator character, `*` matches within one path segment, and `**` matches across path separators. Matching is case-insensitive.
 
-Retention accepts `keep_last`, which keeps the newest specified number of recognized archives, and `max_age`, which moves archives older than a duration such as `30days` to the operating system's trash. If both are provided, an archive selected by either cleanup rule is moved to the trash.
+### Backup schedule
 
-Compression accepts `algorithm` and `level`. The algorithms are `deflate`, `lzma2`, and `ppmd`, matched case-insensitively. The level must be from 0 through 9. All three produce `.7z` archives.
+Choose either `period` or `min_interval`. Omit `schedule` to back up on every invocation.
 
-Omit `duplicate_backup_action` to keep every due backup without hashing. When it is set, SimpleBackup hashes the finished archive and compares it with the latest recognized backup. A matching hash means the complete archive bytes match, including stored metadata. `Skip` sends the new archive to the operating system trash, while `SymbolicLink` and `HardLink` replace it with a link to the existing data. Storage used by a skipped archive is reclaimed when the trash is emptied. If `max_age` would remove the previous backup during the same run, `Skip` keeps the new full archive. With `Skip`, no new dated backup is saved, so `min_backup_interval` continues to use the previous backup's date. Retention promotes a surviving symbolic link to a real archive before removing its data source. If hashing or the duplicate action fails, the new full archive is kept.
+`period` backs up once per period using the computer's local calendar:
 
-`include_timestamps` accepts `true` to store all three timestamps or `false` to omit all three. It also accepts an object with optional Boolean `creation`, `modification`, and `access` fields. Without `duplicate_backup_action`, all three default to `true`. With duplicate handling enabled, `creation` defaults to `true` while `modification` and `access` default to `false`, which improves duplicate matches. Each field explicitly set in the object overrides its default; omitted fields keep the default for the selected duplicate mode. For example, `"include_timestamps": { "access": true }` stores creation and access times, plus modification time only when duplicate handling is disabled. Restored files cannot retain timestamps omitted from the archive. Existing archives remain usable, though their stored timestamps may keep them from matching a new archive byte for byte.
+```json
+"schedule": {
+  "period": "daily"
+}
+```
+
+| Period | A new period begins |
+| --- | --- |
+| `secondly` | At the start of each local clock second. |
+| `minutely` | At the start of each local clock minute. |
+| `hourly` | At the start of each local clock hour. |
+| `daily` | At local midnight. |
+| `weekly` | On Monday at local midnight. |
+| `monthly` | On the first day of each month at local midnight. |
+| `yearly` | On January 1 at local midnight. |
+
+`min_interval` sets the minimum time between successful backups, using durations such as `30m`, `12h`, or `7days`:
+
+```json
+"schedule": {
+  "min_interval": "23h"
+}
+```
+
+Run SimpleBackup through Windows Task Scheduler, cron, or another scheduler; it checks once and exits. Failed backups remain eligible for retry. An unchanged backup handled with `Skip` still counts as successful.
+
+Use different archive prefixes for jobs sharing an output folder. Scheduling history is saved in `<archive_name_prefix>schedule.json`.
+
+### Retention
+
+The `retention` object accepts either or both options:
+
+| Option | Values and purpose |
+| --- | --- |
+| `keep_last` | Non-negative integer; keep the newest N archives. |
+| `max_age` | Duration string, such as `"30days"`; remove older archives. |
+
+Removed archives go to the operating system's trash; empty it to reclaim space. With both rules set, either can remove an archive. Only archives matching the configured prefix and filename format are managed.
+
+### Compression
+
+When setting `compression`, provide both fields:
+
+| Option | Accepted values |
+| --- | --- |
+| `algorithm` | `"deflate"`, `"lzma2"`, or `"ppmd"` (case-insensitive) |
+| `level` | Integer from `0` through `9` |
+
+### Duplicate backups
+
+`duplicate_backup_action` compares the new archive with the latest backup. Values are case-insensitive:
+
+| Value | Action for an identical archive |
+| --- | --- |
+| `Skip` | Move the new archive to trash. |
+| `SymbolicLink` | Replace the new archive with a symbolic link to existing data. |
+| `HardLink` | Replace the new archive with a hard link to existing data. |
+
+Archives must match byte for byte, including stored timestamps. If comparison or linking fails, the full archive is kept. `Skip` also keeps the new archive if the previous one has reached `max_age`.
+
+### File timestamps
+
+`include_timestamps` accepts `true` or `false` for all timestamps, or an object with optional `creation`, `modification`, and `access` Boolean fields. Explicit values override these defaults:
+
+| Field | Without duplicate handling | With duplicate handling |
+| --- | --- | --- |
+| `creation` | `true` | `true` |
+| `modification` | `true` | `false` |
+| `access` | `true` | `false` |
+
+Omitting timestamps improves duplicate matching, but restored files cannot retain omitted timestamps.
 
 ## Building from Source
 
