@@ -100,6 +100,8 @@ impl TryFrom<RawScheduleConfig> for ScheduleConfig {
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackupPeriod {
+    Secondly,
+    Minutely,
     Hourly,
     Daily,
     Weekly,

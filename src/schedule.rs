@@ -14,6 +14,14 @@ impl ScheduleConfig {
                 .to_std()
                 .is_ok_and(|elapsed| elapsed >= interval),
             Self::Period(period) => match period {
+                BackupPeriod::Secondly => {
+                    (last.date_naive(), last.hour(), last.minute(), last.second())
+                        < (now.date_naive(), now.hour(), now.minute(), now.second())
+                }
+                BackupPeriod::Minutely => {
+                    (last.date_naive(), last.hour(), last.minute())
+                        < (now.date_naive(), now.hour(), now.minute())
+                }
                 BackupPeriod::Hourly => {
                     (last.date_naive(), last.hour()) < (now.date_naive(), now.hour())
                 }
@@ -113,6 +121,83 @@ pub fn record_completion(config: &AppConfig, archive: &Path) {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn subhour_periods_follow_local_boundaries() {
+        let cases = [
+            (
+                "secondly",
+                "2026-10-28T08:01:30.100-03:00",
+                "2026-10-28T08:01:30.999-03:00",
+                false,
+            ),
+            (
+                "secondly",
+                "2026-10-28T08:01:30.999-03:00",
+                "2026-10-28T08:01:31-03:00",
+                true,
+            ),
+            (
+                "secondly",
+                "2026-10-28T08:01:59.999-03:00",
+                "2026-10-28T08:02:00-03:00",
+                true,
+            ),
+            (
+                "secondly",
+                "2026-10-28T23:59:59.999-03:00",
+                "2026-10-29T00:00:00-03:00",
+                true,
+            ),
+            (
+                "secondly",
+                "2026-11-01T01:30:30-04:00",
+                "2026-11-01T01:30:30-05:00",
+                false,
+            ),
+            (
+                "minutely",
+                "2026-10-28T08:01:00-03:00",
+                "2026-10-28T08:01:59.999-03:00",
+                false,
+            ),
+            (
+                "minutely",
+                "2026-10-28T08:01:59.999-03:00",
+                "2026-10-28T08:02:00-03:00",
+                true,
+            ),
+            (
+                "minutely",
+                "2026-10-28T08:59:59.999-03:00",
+                "2026-10-28T09:00:00-03:00",
+                true,
+            ),
+            (
+                "minutely",
+                "2026-10-28T23:59:59.999-03:00",
+                "2026-10-29T00:00:00-03:00",
+                true,
+            ),
+            (
+                "minutely",
+                "2026-11-01T01:30:00-04:00",
+                "2026-11-01T01:30:00-05:00",
+                false,
+            ),
+        ];
+        for (period, last, now, due) in cases {
+            let schedule: ScheduleConfig =
+                serde_json::from_value(serde_json::json!({ "period": period })).unwrap();
+            let last = DateTime::parse_from_rfc3339(last).unwrap();
+            let now = DateTime::parse_from_rfc3339(now).unwrap();
+            assert_eq!(
+                schedule.is_due_since(last, now),
+                due,
+                "{period}: {last} -> {now}"
+            );
+        }
+    }
 
     #[test]
     fn calendar_periods_follow_local_boundaries() {
@@ -253,6 +338,8 @@ mod tests {
         let last = DateTime::parse_from_rfc3339("2026-10-29T18:00:00-03:00").unwrap();
         let now = DateTime::parse_from_rfc3339("2026-10-28T18:00:00-03:00").unwrap();
         for schedule in [
+            ScheduleConfig::Period(BackupPeriod::Secondly),
+            ScheduleConfig::Period(BackupPeriod::Minutely),
             ScheduleConfig::Period(BackupPeriod::Hourly),
             ScheduleConfig::Period(BackupPeriod::Daily),
             ScheduleConfig::Period(BackupPeriod::Weekly),

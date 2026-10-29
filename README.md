@@ -120,6 +120,8 @@ Choose either `period` or `min_interval`. Omit `schedule` to back up on every in
 
 | Period | A new period begins |
 | --- | --- |
+| `secondly` | At the start of each local clock second. |
+| `minutely` | At the start of each local clock minute. |
 | `hourly` | At the start of each local clock hour. |
 | `daily` | At local midnight. |
 | `weekly` | On Monday at local midnight. |

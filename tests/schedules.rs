@@ -117,6 +117,21 @@ fn recognized_archive_is_used_when_completion_state_is_absent() {
 }
 
 #[test]
+fn subhour_periods_create_backups_when_due() {
+    for period in ["secondly", "minutely"] {
+        let fixture = Fixture::new();
+        fixture.seed_old_backup();
+        assert!(
+            fixture
+                .run(json!({ "schedule": { "period": period } }))
+                .contains("Backup completed successfully")
+        );
+        assert_eq!(fixture.backups().len(), 2);
+        assert!(fixture.state_path().is_file());
+    }
+}
+
+#[test]
 fn missed_periods_produce_one_current_backup() {
     let fixture = Fixture::new();
     fixture.seed_old_backup();
